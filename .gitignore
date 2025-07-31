@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+*.pdb
+*.egg-info/
+.eggs/
+*.log
+
+# VSCode
+.vscode/
+
+# Environments
+.env
+.env.*
+.venv/
+venv/
+ENV/
+env/
+*.env
+
+# Jupyter
+.ipynb_checkpoints
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Qdrant local data (caso use Qdrant local)
+qdrant_storage/
+
+# Supabase local
+.supabase/
+
+# CSVs e dados sensíveis
+*.csv
+*.xlsx
+*.xls
+
+# Outros arquivos temporários
+*.bak
+*.tmp
+*.swp
