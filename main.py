@@ -1012,7 +1012,7 @@ def send_whatsapp_message(number: str, text: str):
         "text": text
     }
     headers = {
-        "apikey": "61D47BA9F5FD-4812-A44D-6BCAF0E5ABF4",
+        "apikey": os.getenv("EVO_API_KEY"),
         "Content-Type": "application/json"
     }
     response = requests.post(url, json=payload, headers=headers)
