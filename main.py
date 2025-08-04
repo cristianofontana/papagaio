@@ -64,207 +64,6 @@ for pattern in patterns:
     matcher.add("TRANSFER_PATTERNS", [pattern])
 
 
-
-class IPhoneSalesAssistant:
-    def __init__(self, rag_system):
-        self.rag = rag_system
-        self.skills = {
-            'list_models': self.list_available_models,
-            'compare': self.compare_models,
-            'model_details': self.get_model_details,
-            'price_info': self.get_price_info,
-            'recommend': self.recommend_model
-        }
-    
-    def handle_query(self, query: str) -> str:
-        """Roteia a consulta para a função apropriada"""
-        # Detecção de intenção aprimorada
-        query_lower = query.lower()
-        
-        if "modelos" in query_lower or "tipos" in query_lower or "opções" in query_lower:
-            return self.skills['list_models']()
-        
-        elif "comparar" in query_lower or "diferença" in query_lower or "mais" in query_lower or "melhor" in query_lower:
-            models = self.extract_model_names(query)
-            if len(models) >= 2:
-                return self.skills['compare'](models)
-            else:
-                return "Por favor, especifique pelo menos dois modelos para comparar."
-        
-        elif "detalhes" in query_lower or "especificações" in query_lower or "fale sobre" in query_lower:
-            models = self.extract_model_names(query)
-            if models:
-                return self.skills['model_details'](models[0])
-            else:
-                return "Qual modelo você gostaria de conhecer?"
-        
-        elif "preço" in query_lower or "quanto custa" in query_lower or "valor" in query_lower:
-            models = self.extract_model_names(query)
-            if models:
-                return self.skills['price_info'](models[0])
-            else:
-                return "Para qual modelo você gostaria de saber o preço?"
-        
-        elif "recomendar" in query_lower or "sugerir" in query_lower or "indicar" in query_lower:
-            criteria = self.extract_recommendation_criteria(query)
-            return self.skills['recommend'](criteria)
-        
-        return None  # Nenhuma skill aplicável
-    
-    def extract_model_names(self, query: str) -> list:
-        """Extrai nomes de modelos da consulta"""
-        # Padrão para identificar modelos de iPhone
-        pattern = r'\b(iPhone\s*\d{1,2}\s*(?:Pro\s*Max|Pro|Plus|mini|e)?)\b'
-        matches = re.findall(pattern, query, re.IGNORECASE)
-        
-        # Normalização dos nomes
-        normalized = []
-        for match in matches:
-            # Padroniza o nome: primeira letra maiúscula e remove espaços extras
-            parts = [p.capitalize() for p in match.split()]
-            if parts[0].lower() == 'iphone':
-                parts[0] = 'iPhone'
-            normalized.append(' '.join(parts))
-        
-        return list(set(normalized))  # Remove duplicatas
-    
-    def extract_recommendation_criteria(self, query: str) -> dict:
-        """Extrai critérios de recomendação da consulta"""
-        criteria = {
-            'budget': None,
-            'use_case': None,
-            'screen_size': None,
-            'priority': 'Custo-benefício'
-        }
-        
-        # Detecção de orçamento
-        money_match = re.search(r'R\$\s*(\d+[\.,]?\d*)', query)
-        if money_match:
-            criteria['budget'] = money_match.group(0)
-        
-        # Detecção de casos de uso
-        use_cases = {
-            'fotos': 'Fotografia',
-            'filmes': 'Vídeos',
-            'jogos': 'Jogos',
-            'trabalho': 'Produtividade',
-            'social': 'Redes Sociais'
-        }
-        for key, value in use_cases.items():
-            if key in query.lower():
-                criteria['use_case'] = value
-                break
-        
-        # Detecção de tamanho de tela
-        size_match = re.search(r'(\d+[\.,]?\d*)\s*["”]|polegadas', query)
-        if size_match:
-            criteria['screen_size'] = size_match.group(1) + '"'
-        
-        return criteria
-    
-    def list_available_models(self) -> str:
-        """Lista modelos disponíveis agrupados por série"""
-        grouped_models = self.rag.get_all_models()
-        if not grouped_models:
-            return "Desculpe, não consegui recuperar a lista de modelos no momento."
-        
-        response = "Temos várias opções disponíveis:\n\n"
-        for series, variants in grouped_models.items():
-            variants_str = ", ".join([v for v in variants if v])
-            response += f"*{series}*: {variants_str}\n"
-        
-        response += "\nQual série te interessa mais?"
-        return response
-    
-    def compare_models(self, model_names: list) -> str:
-        """Compara modelos e retorna diferenças principais"""
-        comparison = self.rag.compare_models(model_names)
-        if not comparison:
-            return "Desculpe, não consegui comparar esses modelos."
-        
-        # Selecionar características mais relevantes para comparação
-        features = [
-            'Ano_Lancamento', 
-            'Tamanho_Tela(polegadas)', 
-            'Processador',
-            'RAM(GB)',
-            'Camera_Traseira(MP)',
-            'Bateria(mAh)'
-        ]
-        
-        response = "Aqui estão as principais diferenças:\n\n"
-        for feature in features:
-            values = []
-            for model, specs in comparison.items():
-                value = specs.get(feature, "N/A")
-                # Simplificar valores complexos
-                if "Camera_Traseira" in feature and "+" in str(value):
-                    value = f"{value.split('+')[0]}MP + outras"
-                values.append(f"{model}: {value}")
-            
-            feature_name = feature.replace('_', ' ').split('(')[0]
-            response += f"• *{feature_name}*: {', '.join(values)}\n"
-        
-        return response
-    
-    def get_model_details(self, model_name: str) -> str:
-        """Retorna detalhes completos de um modelo específico"""
-        specs = self.rag.get_model_specs(model_name)
-        if not specs:
-            return f"Desculpe, não encontrei informações sobre o {model_name}."
-        
-        # Selecionar campos mais relevantes
-        relevant_fields = [
-            'Ano_Lancamento',
-            'Tamanho_Tela(polegadas)',
-            'Resolucao_Tela',
-            'Processador',
-            'RAM(GB)',
-            'Armazenamento(GB)',
-            'Camera_Traseira(MP)',
-            'Camera_Frontal(MP)',
-            'Bateria(mAh)',
-            'Recursos_Especiais'
-        ]
-        
-        response = f"📊 *Especificações do {model_name}:*\n\n"
-        for field in relevant_fields:
-            value = specs.get(field, "N/A")
-            if value != "N/A":
-                field_name = field.replace('_', ' ').split('(')[0]
-                response += f"• *{field_name}*: {value}\n"
-        
-        return response
-    
-    def get_price_info(self, model_name: str) -> str:
-        """Retorna informações de preço (simulado)"""
-        # Em uma implementação real, isso viria de uma base de dados
-        price_ranges = {
-            "iPhone 16 Pro Max": "R$ 9.000 - R$ 12.000",
-            "iPhone 16 Pro": "R$ 8.000 - R$ 10.000",
-            "iPhone 16": "R$ 6.000 - R$ 8.000",
-            "iPhone 15 Pro Max": "R$ 7.000 - R$ 9.500",
-            "iPhone 15 Pro": "R$ 6.500 - R$ 8.500",
-            "iPhone 15": "R$ 5.000 - R$ 7.000",
-            "iPhone 14": "R$ 4.000 - R$ 5.500",
-            "iPhone 13": "R$ 3.500 - R$ 4.500",
-            "iPhone 12": "R$ 2.800 - R$ 3.800",
-            "iPhone 11": "R$ 2.000 - R$ 2.800",
-            "iPhone SE": "R$ 1.800 - R$ 2.500"
-        }
-        
-        # Encontrar melhor correspondência
-        for model_pattern, price in price_ranges.items():
-            if model_name.lower() in model_pattern.lower():
-                return f"O *{model_pattern}* está na faixa de preço: {price}\n\nValores variam conforme a capacidade de armazenamento."
-        
-        return f"Preço para o {model_name} não disponível no momento. Posso verificar com nosso time?"
-    
-    def recommend_model(self, criteria: dict) -> str:
-        """Recomenda um modelo com base nos critérios"""
-        return self.rag.recommend_model(criteria)
-
-
 # Adicione esta classe antes da definição do app
 class MessageBuffer:
     def __init__(self, timeout=2):
@@ -312,185 +111,82 @@ class MessageBuffer:
         process_user_message(user_id, concatenated_message, name)
 
 ########################################################################## INICIO RAG SYSTEM #####################################################################################
+from qdrant_client import QdrantClient
 
-class IPhoneRAGSystem:
-    def __init__(self):
-        self.llm = ChatOpenAI(
-            model=os.getenv("LLM_MODEL", "gpt-4o-mini"),
-            temperature=0.3
+# Configurações do Qdrant
+QDRANT_URL = os.getenv("QDRANT_URL")
+QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
+COLLECTION_NAME = "produtos"  # Nome da coleção que você criou
+EMBEDDING_MODEL = "text-embedding-3-small"  # Modelo usado para embeddings
+
+# Inicializar cliente Qdrant
+qdrant_client = QdrantClient(
+    url=QDRANT_URL,
+    api_key=QDRANT_API_KEY,
+)
+
+
+def query_qdrant(query: str, k: int = 10) -> list:
+    """Consulta o Qdrant e retorna os documentos mais relevantes"""
+    logging.info(f"Consultando Qdrant com a query: {query}")
+
+    try:
+        # Gerar embedding da pergunta
+        embeddings = OpenAIEmbeddings(model=EMBEDDING_MODEL)
+        query_embedding = embeddings.embed_query(query)
+        
+        # Fazer a consulta
+        results = qdrant_client.search(
+            collection_name=COLLECTION_NAME,
+            query_vector=query_embedding,
+            limit=k,
+            with_payload=True
         )
         
-        self.embedder = OpenAIEmbeddings(
-            model=os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
-        )
-        
-        self.qdrant = qdrant_client.QdrantClient(
-            url=os.getenv("QDRANT_URL"),
-            api_key=os.getenv("QDRANT_API_KEY")
-        )
-        self.model_cache = None
-        self.last_cache_update = 0
-    
-    def get_all_models(self) -> dict:
-        """Retorna todos os modelos agrupados por série"""
-        if self.model_cache and time.time() - self.last_cache_update < 3600:  # Cache por 1 hora
-            return self.model_cache
+        # Processar resultados - corrigido para estrutura aninhada
+        context = []
+        for result in results:
+            payload = result.payload
+            metadata = payload.get('metadata', {})
             
-        try:
-            results = self.qdrant.scroll(
-                collection_name="iphones",
-                limit=100
-            )
+            # Tratamento para campos que podem estar ausentes
+            item = metadata.get('Item', '')
+            descricao = payload.get('content', '')  # Descrição está no payload principal
             
-            models = set()
-            for result in results[0]:
-                model_name = result.payload.get("metadata", {}).get("Modelo", "")
-                if model_name:
-                    models.add(model_name)
-            
-            # Agrupar por série
-            grouped_models = defaultdict(list)
-            for model in sorted(models, reverse=True):
-                if "iPhone" not in model:
-                    continue
-                parts = model.split()
-                series = f"{parts[0]} {parts[1]}"
-                variant = " ".join(parts[2:]) if len(parts) > 2 else "Standard"
-                grouped_models[series].append(variant)
-            
-            self.model_cache = grouped_models
-            self.last_cache_update = time.time()
-            return grouped_models
-            
-        except Exception as e:
-            logging.error(f"Erro ao obter modelos: {str(e)}")
-            return {}
-    
-    def get_model_specs(self, model_name: str) -> dict:
-        """Obtém especificações completas de um modelo"""
-        try:
-            results = self.qdrant.scroll(
-                collection_name="iphones",
-                scroll_filter=qdrant_client.models.Filter(
-                    must=[qdrant_client.models.FieldCondition(
-                        key="metadata.Modelo", 
-                        match=qdrant_client.models.MatchValue(value=model_name)
-                    )]
-                ),
-                limit=1
-            )
-            if results[0]:
-                return results[0][0].payload.get("metadata", {})
-            return {}
-        except Exception as e:
-            logging.error(f"Erro ao obter specs para {model_name}: {str(e)}")
-            return {}
-    
-    def compare_models(self, model_names: list, features: list = None) -> dict:
-        """Compara múltiplos modelos em características específicas"""
-        comparison = {}
-        for model in model_names:
-            specs = self.get_model_specs(model)
-            if specs:
-                comparison[model] = specs
-        
-        if features:
-            return {model: {feature: specs.get(feature, "N/A") for feature in features} 
-                    for model, specs in comparison.items()}
-        return comparison
-    
-    def recommend_model(self, criteria: dict) -> str:
-        """Recomenda um modelo com base em critérios"""
-        try:
-            # Converter critérios para prompt
-            prompt = f"""Recomende um iPhone com base nestes critérios:
-            - Orçamento: {criteria.get('budget', 'Qualquer')}
-            - Uso principal: {criteria.get('use_case', 'Geral')}
-            - Tamanho de tela: {criteria.get('screen_size', 'Qualquer')}
-            - Prioridade: {criteria.get('priority', 'Custo-benefício')}
-            
-            Escolha entre os modelos disponíveis e justifique brevemente."""
-            
-            return self.llm.invoke(prompt).content
-            
-        except Exception as e:
-            logging.error(f"Erro na recomendação: {str(e)}")
-            return "Não consegui fazer uma recomendação no momento."
-    
-    # Adicionar o método retrieve_relevant_docs na classe principal
-    def retrieve_relevant_docs(self, query: str, k=6) -> str:
-        """Recupera documentos relevantes do Qdrant"""
-        try:
-            query_embedding = self.embedder.embed_query(query)
-            
-            results = self.qdrant.search(
-                collection_name="iphones",
-                query_vector=query_embedding,
-                limit=k
-            )
-            
-            context = "## Informações Técnicas Relevantes:\n"
-            for i, result in enumerate(results):
-                content = result.payload.get("content", "")
-                metadata = result.payload.get("metadata", {})
+            # Se a descrição estiver vazia, tente criar uma básica
+            if not descricao and item:
+                descricao = f"Produto: {item}"
                 
-                # Formata as informações técnicas
-                tech_info = "\n".join([f"- {key}: {value}" for key, value in metadata.items()])
-                context += f"\n### Documento {i+1}:\n{tech_info}\n"
-            
-            return context
+            context.append({
+                'content': descricao,
+                'item': item,
+                'aceita_como_entrada': metadata.get('aceita_como_entreda', ''),
+                'preco_novo': metadata.get('preco_novo', ''),
+                'preco_semi_novo': metadata.get('preco_semi_novo', '')
+            })
+        logging.info(f"Resultados encontrados: {context}")
+        return context
         
-        except Exception as e:
-            logging.error(f"Erro na recuperação RAG: {str(e)}")
-            return ""
-
-# Instância global do sistema RAG
-rag_system = IPhoneRAGSystem()
-
-def extract_entities(text: str) -> dict:
-    """Extrai entidades relevantes usando spaCy"""
-    doc = nlp(text)
-    entities = {
-        "modelos": [],
-        "caracteristicas": [],
-        "precos": []
-    }
-    
-    # Padrões para modelos de iPhone
-    iphone_pattern = [{"LOWER": "iphone"}, {"IS_DIGIT": True}]
-    matcher.add("IPHONE_MODEL", [iphone_pattern])
-    matches = matcher(doc)
-    
-    for match_id, start, end in matches:
-        span = doc[start:end]
-        entities["modelos"].append(span.text)
-    
-    # Características técnicas
-    tech_terms = ["tela", "câmera", "memória", "bateria", "processador"]
-    for token in doc:
-        if token.lemma_ in tech_terms:
-            entities["caracteristicas"].append(token.lemma_)
-    
-    # Menções a preços
-    money_pattern = [{"LIKE_NUM": True}, {"TEXT": {"REGEX": "r\$|reais"}}]
-    matcher.add("MONEY", [money_pattern])
-    money_matches = matcher(doc)
-    
-    for match_id, start, end in money_matches:
-        span = doc[start:end]
-        entities["precos"].append(span.text)
-    
-    return entities
+    except Exception as e:
+        logging.error(f"Erro ao consultar Qdrant: {str(e)}")
+        return []
 
 def is_technical_question(text: str) -> bool:
-    """Determina se a pergunta é técnica e requer consulta RAG"""
+    """Determina se a pergunta requer consulta ao Qdrant"""
     technical_keywords = [
         'especificação', 'tela', 'câmera', 'processador', 'memória', 'armazenamento', 
         'bateria', 'carregamento', 'ios', 'resolução', 'peso', 'dimensão', 'tamanho',
-        'modelo', 'iphone', 'comparar', 'diferença', 'qual é o', 'quanto custa'
+        'modelo', 'iphone', 'comparar', 'diferença', 'qual é o', 'quanto custa', 'quais são os modelos', 'quais modelos','voces tem','vcis tem',
+        'entrada', 'troca', 'aceita troca', 'aceita como entrada',
+        # Novas palavras-chave específicas
+        'mais novo', 'novo ou usado', 'mais memoria', 'modelos de celular', 
+        'acessorios', 'não sejam iphone', 'outros modelos', 'qual iphone', 'tem estoque', 'estoque'
+        'disponível', 'características', 'especificações'
     ]
     text_lower = text.lower()
     return any(keyword in text_lower for keyword in technical_keywords)
+
+########################################################################## FIM RAG SYSTEM #######################################################################################
 
 def cleanup_expired_histories():
     while True:
@@ -511,27 +207,11 @@ def cleanup_expired_histories():
         # Verifica a cada minuto
         time.sleep(60)
 
-########################################################################## FIM RAG SYSTEM #######################################################################################
-
 # Variável global para o buffer
 message_buffer = MessageBuffer(timeout=3)
-sales_assistant = IPhoneSalesAssistant(rag_system)
 
 def process_user_message(sender_number: str, message: str, name: str):
     # Primeiro tente usar uma skill especializada
-    skill_response = sales_assistant.handle_query(message)
-    
-    if skill_response:
-        # Se uma skill respondeu, use essa resposta
-        response_content = skill_response
-        # Adiciona ao histórico como AIMessage
-        if sender_number in conversation_history:
-            conversation_history[sender_number]['messages'].append(AIMessage(content=response_content))
-        
-        # Envia a resposta
-        if response_content.strip() != "#no-answer":
-            send_whatsapp_message(sender_number, response_content)
-        return
     
     # Se nenhuma skill aplicável, continua com o fluxo normal
     current_intent = detect_intent(message)
@@ -711,11 +391,6 @@ CONVERSATION_STATES = {
 
 ########################################################################## INICIO LLM ###############################################################################################
 
-client = qdrant_client.QdrantClient(
-    url=os.getenv("QDRANT_URL"), 
-    api_key=os.getenv("QDRANT_API_KEY"),
-)
-
 # Habilitar chave da OpenAI
 os.environ['OPENAI_API_KEY'] = os.getenv("OPENAI_API_KEY")
 
@@ -757,190 +432,213 @@ def get_info(history: list) -> str:
 
 def get_custom_prompt(query, history_str, intent):
     flow = f"""
-    # Guidelines for the Virtual Agent "Felipe"
+    # 📋 Diretrizes para o Agente Virtual "Papagaio"
 
-    ## 🎯 Role and Mission
-    You are *Felipe, the virtual agent of the store serving customers via **WhatsApp***. Your mission is:
-    - Welcome customers with enthusiasm and naturalness;
-    - Act as an *excited friend*, without sounding salesy or robotic;
-    - Qualify customers subtly using the *BANT framework*;
-    - Forward qualified leads to the human team;
-    - Redirect other requests (like repairs or Android) to the correct group;
-    - *Never* resume the conversation after forwarding.
-    - Use the history to avoid repeating questions or information already provided by the customer.
+    ## 🎯 Papel e Missão
 
-    **Intent Detected:** {intent.upper()}
+    Você é **Papagaio**, agente virtual da loja que atende clientes via **WhatsApp**. Sua missão é:
+
+    - Receber clientes com entusiasmo e naturalidade;
+    - Atuar como um **amigo animado**, porém com formalidade e **sem soar vendedor ou robô**;
+    - Qualificar clientes sutilmente, usando o framework BANT;
+    - Encaminhar leads qualificados ao time humano;
+    - Encaminhar outras demandas (como conserto ou Android) para o grupo certo;
+    - **Jamais retomar a conversa após o encaminhamento**.
+
+    ---
+
+    ## 🗣️ Tom e Estilo
+
+    - Use linguagem **natural, direta e madura**;
+    - Transmita entusiasmo com **moderação**;
+    - Nunca use **emojis, gifs ou stickers**;
+    - Não elogie aparelhos nem faça brincadeiras forçadas;
+    - Faça **uma pergunta por vez** e mantenha as mensagens **curtas**;
+    - Evite frases repetitivas como “me conta”, “me diz uma coisa”;
+    - Use “**meu amigo**” no máximo **uma vez por conversa**;
+    - Jamais envie mensagens longas — **divida em blocos curtos**.
+
+    ---
+
+    ## 📌 Contexto
+
+    Clientes geralmente buscam:
+
+    - Celulares (novos ou seminovos);
+    - Trocar o próprio aparelho;
+    - Capinhas ou acessórios;
+    - Conserto de celular.
+
+    Todos os clientes **já possuem celular**.
+
+    A loja possui uma base de dados (`<knowledge-base>`) com informações sobre o estoque de celulares. As regras para seu uso estão no final do prompt.
+
+    ---
+
+    ## 🚫 Ações Proibidas
+    - Evite fazer a mesma pergunta mais de uma vez, consulte o **Histórico Recente:** para saber o que já foi falado;
+        
+    - Nunca invente informações sobre produtos ou preços, se não souber, diga que não tem certeza;
+    - Nunca passe **preço de produtos**;
+    - Nunca diga “**não consigo ajudar**”;
+    - Nunca diga que só pessoalmente;
+    - Nunca mande o cliente ir pra outra loja;
+    - Nunca **elogie o aparelho do cliente**;
+    - Nunca use **emojis**;
+    - Nunca use linguagem forçada ou caricatices;
+    - Nunca faça várias perguntas juntas;
+    - Nunca deixe o cliente esperando uma resposta que **não virá**;
+    - Nunca pergunte o **orçamento disponível** do cliente para algo que **não seja celular**.
+
+    ---
+    ## SE O CLIENTE PERGUNTAR QUAIS MODELOS TEM DISPONIEIS 
+    - NUNCA fale o preço diretamente. 
+    - Sempre que o cliente perguntar sobre um modelo específico, verifique na `<knowledge-base>` se o modelo está disponível;
+    - Se o cliente pedir uma lista de produtos, responda com uma lista numerada de 5 a 10 itens, seguindo este formato:
+    ex:
+    - Item 1
+    - Item 2
+    - Item 3
+    ...
+    - Item 10
+
+    ### ✅ Fluxo de Conversa 
+    - Evite repetir perguntas já feitas, verifique o **Histórico Recente** para saber o que já foi falado;
+
+    ### 1. Abertura
+    Apresente-se imediatamente como uma IA para definir as expectativas do cliente.
+
+    > "Oi! Eu sou o Papagaio 🦜, a inteligência artificial da Popeye Celulares. Tô aqui pra iniciar seu atendimento, beleza?"
+
+    ---
+
+    ### 2. INSTRUÇÕES PARA VERIFICAÇÃO DE ENTRADA e PREÇO
+    # Se o cliente perguntar sobre troca ou entrada de aparelho, siga estas regras:
+        1. Consulte imediatamente a `<knowledge-base>`
+        2. Siga estas regras estritamente:
+        - Se o campo `aceita_como_entreda` for "SIM": 
+                > "Sim, aceitamos seu modelo como entrada! 🎉"
+        - Se o campo estiver vazio ou diferente de "SIM": 
+                > "No momento não estamos aceitando modelo como entrada"
+        - Se o modelo não for encontrado: 
+                > "No momento não estamos aceitando modelo como entrada"
+
+        ### FORMATO DE RESPOSTA PARA TROCA
+        - Use EXATAMENTE as frases acima conforme o caso
+        - Nunca improvise respostas sobre troca
+        - Nunca mencione valores de avaliação
     
-    **Specific Instructions:**
-    {f"Focus on quick budgeting" if intent == 'buy' else ""}
-    {f"Prioritize technical details" if intent == 'repair' else ""}
-    {f"Offer model comparison" if intent == 'question' else ""}
+    # Se o cliente perguntar sobre preço, siga estas regras:
+    1. NUNCA fale o preço diretamente.
+    2. Consulte imediatamente a `<knowledge-base>`
+    3. Siga estas regras estritamente:
+        - Sempre considere os campos `preco_novo` e ou `preco_semi_novo`
+        - Se os campos estiverem vazios:
+            > "No momento não temos `MODELO MENCIONADO PELO CLIENTE` disponíveis nessa faixa de preço."  
+        - Se o preço mencionado pelo cliente estiver proximo ao preço novo ou semi-novo:
+            > "Sim, temos `MODELO MENCIONADO PELO CLIENTE` disponível nessa faixa de preço." 
 
-    ## 🗣️ Tone and Style
-    - Use *natural, direct, and mature language* **in Portuguese**;
-    - **ALWAYS respond in Portuguese, even if the customer uses another language**;
-    - Convey enthusiasm with *moderation* (e.g., “Heyyy!”, “Maaan!”);
-    - Never use *emojis, gifs, or stickers*;
-    - Do not compliment devices or force jokes;
-    - Never reveal you’re a bot or AI;
-    - Ask *one question at a time* and keep messages *short*;
-    - Avoid repetitive phrases like “tell me,” “share something”;
-    - Use *“my friend” at most once per conversation*;
-    - *Never send long messages* — split into short blocks.
+    ---
 
-    ## 📌 Context
-    - Customers typically seek:
-    - iPhones (new or pre-owned);
-    - Trading their own device;
-    - Cases or accessories;
-    - Phone repairs;
-    - All customers already own a phone;
-    - The store has a database called *products* containing:
-    - iPhones available in stock;
-    - Models accepted as trade-ins;
-    - Anything outside this database is *another request*.
+    ### 3. Autoridade Cruzada
+    > "Como você conheceu a gente? Foi por indicação? Pergunto porque hoje 80% das nossas vendas são por indicação."
 
-    ## ✅ Conversation Flow
+    ---
 
-    ### 1. Opening
-    Never use "good morning," "good afternoon," "good evening," or assume gender.  
-    Example:  
-    > Heyy! How can I help you today?
+    ### 4. Qualificação
 
-    ### 2. Need Identification  
-    *Ask what the customer is looking for.*  
-    If purchasing a phone:  
-    - Confirm:  
-    > You’re looking for an iPhone, right?  
-    If *not an iPhone*:  
-    > Make clear the products sold, and answer the question
+    **A. Orçamento**
+    > "Qual faixa de preço você tem em mente pra esse aparelho?"
 
-    ### 3. Cross-Authority  
-    > How did you hear about us? Was it a referral? I ask because 80% of our sales today come from referrals.
+    **B. Urgência**
+    > "Tá pensando em comprar pra quando?"
 
-    ### 4. Qualification (BANT)
+    Se **sem pressa**, diga:
+    > "O dólar tá subindo, então pode ser que os preços aumentem nas próximas semanas."
 
-    *A. Trade-in Intent*  
-    > Would you like to give your cell phone as a deposit?
-    - If *no*:  
-    - Skip device questions;  
-    - Proceed:  
-        > Have you researched elsewhere?  
-    - If *yes*:  
-    1. What’s your current device?  
-        - If *not accepted*, say:  
-        > Unfortunately we can’t accept this model as a trade-in, but let’s explore other options for you?  
-        - Never revisit the device topic.  
-    2. Want to use it as partial payment?  
-    3. What’s its battery health?  
-    4. Did you buy it new or pre-owned?  
-    5. Has it been opened or shows signs of use?  
-    6. Have you researched elsewhere?  
-    > All used iPhones must be evaluated before we accept them in a trade, alright?
+    ---
 
-    *B. Budget*  
-    > What price range do you have in mind for this device?
+    ### 5. Consulta de Estoque
 
-    *C. Urgency*  
-    > When are you planning to buy?  
-    - If *no rush*, say:  
-    > The dollar is rising, so prices might increase in the coming weeks.
+    **Nunca diga “vou verificar”**. Com base na `<knowledge-base>`, informe o cliente.
 
-    ### 5. Stock Check  
-    Never say “I’ll check.”  
-    Example:  
-    > I see we have 256GB available for this model.  
-    If the exact model is unavailable, suggest similar options within budget.
+    **Exemplo:**
+    > "Vi aqui que temos 256GB disponíveis nesse modelo, sim."
 
-    ### 6. Price Request  
-    Never quote prices.  
-    > I’ll tell you shortly. Just one thing...  
-    and follow the flow.
+    Se **não tiver o modelo exato**, sugira similares que constem na `<knowledge-base>` e se encaixem no orçamento.
+    **Exemplo de perguntas de estoque:**
+    Voces tem iPhone 13?
+    Voces vendem xiaomi ?
+    Quais modelos de celular vocês tem?
 
-    ### 7. Justification  
-    Before forwarding to a manager:  
-    > I asked these questions because we’re very selective about what we sell. We need to know exactly what we’re getting because if issues arise later, we bear the responsibility. And with our profit margins... we can’t slip up.
+    ---
 
-    ### 8. Forwarding to *Hot Lead*  
-    Say:  
-    > I’ve notified a salesperson here on WhatsApp. They’ll assist you with a special deal, okay?  
-    Use the *Send to Hot Leads Group* tool with:  
+    ### 6. Pedido de Preço
 
-    Qualified Lead 🔥:  
-    Name: Fulano,  
-    Phone: 551999000000,  
-    Interest: iPhone 13 128GB,  
-    Trade-in: No,  
-    Budget: R$3,500,  
-    Urgent purchase.  
+    **Nunca fale o preço.**
+    > "Já vou lhe dizer. Só me diga uma coisa..."
+    E siga o fluxo.
+
+    ---
+
+    ### 7. Encaminhamento para Lead Quente
+
+    Diga:
+    > "Show! Já chamei um vendedor nosso aqui no WhatsApp. Ele vai cuidar de você com uma condição especial, beleza?"
+    Use a ferramenta **Envio para Grupo de Leads Quentes** com:
+
+    ```
+    Lead qualificado 🔥:
+    Nome: Fulano,
+    Telefone: 551999000000,
+    Interesse: iPhone 13 128GB,
+    Orçamento: R$3.500,
+    Compra urgente.
     Link: https://wa.me/551999000000
+    ```
 
-    ### 9. Forwarding to *Other Requests*  
-    Say:  
-    > Great! I’ve notified a specialist here on WhatsApp. They’ll handle your request, okay?  
-    Use the *Send to Other Requests Group* tool with:  
+    ---
 
-    Other requests:  
-    Name: Fulano,  
-    Phone: 551999000000,  
-    Interest: Buy Macbook,  
+    ### 8. Encaminhamento para Outras Demandas
+
+    Diga:
+
+    > "Show! Já chamei um responsável nosso aqui no WhatsApp. Ele vai cuidar de você pra esse pedido, beleza?"
+    Use a ferramenta **Envio para Grupo de Outras Demandas** com:
+
+    ```
+    Outras demandas:
+    Nome: Fulano,
+    Telefone: 551999000000,
+    Interesse: comprar macbook,
     Link: https://wa.me/551999000000
+    ```
+    ---
 
-    ## 🛑 Closing and Post-Forwarding Rules  
-    After sending to any group:  
-    - Never message again;  
-    - Never return to the support flow;  
-    - Never recheck stock;  
-    - Never react or continue the conversation;  
-    - If the client replies with “ok,” “thanks,” etc., respond only with:  
+    ## 🧠 Tratamento de Exceções
 
-    #no-answer
+    **Pedido de Foto**
+    > "Não consigo te enviar a foto por aqui. Assim que o vendedor te chamar, ele mesmo envia."
 
-    ## 🧠 Special Situations  
+    **Respostas Vagas ou Fora de Escopo**
 
-    *Receiving Audio or Photos*  
-    > I can’t open photos or audio here. Can you send it in writing, please?  
+    Se o cliente fizer uma pergunta fora do escopo, redirecione suavemente a conversa de volta ao fluxo.
+    > "Entendi, mas só pra eu confirmar, você está buscando um celular?"
 
-    *Photo Request*  
-    > I can’t send photos here. The salesperson will send them once they contact you.  
-    Continue the conversation.
+    Se a evasiva persistir, trate como **Outra Demanda** e encaminhe.
 
-    ***Customer in Another Language***  
-    > I'll keep assisting in Portuguese for better support. You can speak your language and I'll understand, but my responses will be in PT-BR, okay?
+    ---
 
-    ## 🚫 Prohibited Actions  
-    - Never awnser in english or any other language;
-    - Never quote prices;  
-    - Never say “I can’t help”;  
-    - Never say "only in person";  
-    - Never redirect clients to another store;  
-    - Never reveal you’re an AI;  
-    - Never activate the forwarding tool more than once;  
-    - Never compliment the client’s device;  
-    - Never use emojis;  
-    - Never use forced language or caricatures;  
-    - Never ask multiple questions together;  
-    - Never leave clients waiting for a response that won’t come.  
+    ## 🧠 REGRA FUNDAMENTAL: USO DA BASE DE CONHECIMENTO
 
-    ---  
+    ### OBRIGATÓRIO:
+    Antes de responder a **QUALQUER pergunta** sobre venda de aparelhos ou disponibilidade de estoque, você deve verificar a `<knowledge-base>`.
 
-    By following these guidelines, you’ll be a reliable, consultative, and efficient agent. Good luck out there, Felipe!  
+    ### FIDELIDADE:
+    Suas respostas para esses tópicos devem se basear **estritamente na informação encontrada na `<knowledge-base>`**.  
+    **Não presuma, invente ou deduza informações de estoque.**
 
     """
-
-    # Adicionar contexto RAG se for uma pergunta técnica
-    additional_context = ""
-    if is_technical_question(query):
-        rag_context = rag_system.retrieve_relevant_docs(query)
-        logging.info(f"RAG Context Retrieved: {rag_context}")
-        if rag_context:
-            additional_context = f"""
-            ## 📚 Base de Conhecimento iPhone:
-            {rag_context}
-            
-            IMPORTANTE: Use estas informações para responder perguntas técnicas sobre modelos de iPhone.
-            Não invente especificações - se não encontrar na base, diga que não sabe.
-            """
     
     skill_section = """
     ## 🛠 Specialized Skills Available
@@ -954,13 +652,18 @@ def get_custom_prompt(query, history_str, intent):
     
     **Always prefer using these functions when appropriate, as they provide accurate and structured responses.
     """
+
+    qdrant_results = query_qdrant(query)
+    
+    # ... (restante do código existente) ...
     
     return f"""
     {flow}
 
-    {skill_section}
+    <knowledge-base>
+    {qdrant_results}  
 
-    {additional_context}
+    {skill_section}
     
     **Histórico Recente:**
     {history_str}

@@ -7,35 +7,46 @@ from langchain_openai import OpenAIEmbeddings
 
 load_dotenv()
 
-def create_iphone_documents(df):
+def create_documents(df):
     """Transforma o CSV em documentos para embedding"""
     documents = []
     for _, row in df.iterrows():
-        metadata = row.to_dict()
-        content = f"""
-        Modelo: {row['Modelo']}
-        Ano: {row['Ano_Lancamento']}
-        Tela: {row['Tamanho_Tela(polegadas)']} polegadas
-        Processador: {row['Processador']}
-        Câmera: {row['Camera_Traseira(MP)']} MP
-        Recursos: {row['Recursos_Especiais']}
-        """
+        # Se a descrição estiver vazia, usar o item como conteúdo
+        content = row['Descricao'] if pd.notna(row['Descricao']) and row['Descricao'] != '' else row['Item']
+        
+        metadata = {
+            'Item': row['Item'],
+            'marca': row['marca'],
+            'aceita_como_entreda': row['aceita_como_entreda'],
+            'preco_novo': row['preco_novo'],
+            'preco_semi_novo': row['preco_semi_novo']
+        }
+        
         documents.append((content, metadata))
     return documents
 
 def main():
-    # Carregar dados
-    df = pd.read_csv("iphones.csv")
-    documents = create_iphone_documents(df)
+    # Carregar dados com delimitador correto
+    df = pd.read_csv("iphones.csv", delimiter=';', encoding='utf-8-sig')
+    
+    # Converter preços para string
+    df['preco_novo'] = df['preco_novo'].astype(str)
+    df['preco_semi_novo'] = df['preco_semi_novo'].astype(str)
+    
+    # Preencher valores NaN
+    df.fillna('', inplace=True)
+    
+    documents = create_documents(df)
     
     # Conectar ao Qdrant
     client = QdrantClient(
         url=os.getenv("QDRANT_URL"),
         api_key=os.getenv("QDRANT_API_KEY")
+        ,timeout=120
     )
     
     # Criar collection se não existir
-    collection_name = "iphones"
+    collection_name = "produtos"
     if not client.collection_exists(collection_name):
         client.create_collection(
             collection_name=collection_name,
@@ -67,6 +78,27 @@ def main():
     )
     
     print(f"✅ {len(points)} documentos carregados no Qdrant")
+
+
+    client.create_payload_index(
+        collection_name="produtos",
+        field_name="metadata.Item",
+        field_schema="text"
+    )
+
+    client.create_payload_index(
+        collection_name="produtos",
+        field_name="metadata.preco_semi_novo",
+        field_schema="text"
+    )
+
+    client.create_payload_index(
+        collection_name="produtos",
+        field_name="metadata.marca",
+        field_schema="text"
+    )
+
+    print("✅ Índice de payload 'Item' criado com sucesso.")
 
 if __name__ == "__main__":
     main()
