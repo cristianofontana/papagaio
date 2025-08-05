@@ -28,6 +28,7 @@ from supabase import create_client, Client
 import os
 import time
 from datetime import datetime, timedelta
+import pytz
 import threading
 from threading import Lock
 from typing import Dict, Any, List, Optional, Union
@@ -72,6 +73,16 @@ patterns = [
     [{"LOWER": "finalizar"}, {"LOWER": "atendimento"}],
     [{"LOWER": "encaminhamento"}, {"LOWER": "para"}, {"LOWER": "humanos"}]
 ]
+
+nome_do_agent = 'Papagaio'
+nome_da_loja = 'Mr Shop'
+horario_atendimento = '9h às 18h de Segunda a Sabado'
+endereco_da_loja = 'Av. Pres. Carlos Luz - Pirapetinga, MG, 36730-000' 
+metodo_de_pagamento = {
+    'iphone': {'cartao'},
+    'Android': {'cartao','boleto'},
+    'Outros': {'cartao','boleto'}
+}
 
 for pattern in patterns:
     matcher.add("TRANSFER_PATTERNS", [pattern])
@@ -202,6 +213,110 @@ def is_technical_question(text: str) -> bool:
 
 ########################################################################## FIM RAG SYSTEM #######################################################################################
 
+############################################################# INICIO SUPABASE ##########################################################################################
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+# Sequência de reativação (tempo em minutos, mensagem)
+REACTIVATION_SEQUENCE = [
+    (1, 
+"""Eu não vou aceitar que voçê suma!
+Aqui, na {nome_da_loja} a gente valoriza muito todas as pessoas que entram em contato com a gente!
+
+Você tá precisando comprar o sey celylar em um lugar que te entregue, qualidade e preço justo...
+e isso nós temos de sobra!!!
+a gente pode se ajudar!!!
+me da 5 minutos da sua atenção que eu resolvo sua vida!"""),
+    (2, 
+"""Como eu te disse ontem... Eu não vou te abandonar... Ou voce me dá atenção
+ou eu vou descobrir onde voce mora e ir ai na sua casa!!!
+KKKKKKKKKKKK
+me ajuda a te ajudar!!! Eu preciso bater a meta e voce precisa de um novo CELULAR!!!"""),
+    (3, 
+"""Você tem dois caminhos:
+primeiro: Você vai ver essa mensagem, e vai me ignorar e a gente
+nunca mais vai conversar... Provavelmente você vai comprar em outra loja,
+essa loka, vai te prometer mundos e fundos, mas na hora que você precisar,
+ELES VÃO SUMIR...
+
+Segundo Caminho: Você me da 5 minutos da sua atenção, tempo suficiente 
+pra eu provar que você está na loja certa... Te vendo um produto no preço 
+justo e com toda a qualidade do mundo e você vira cliente fiel!
+o segundo caminho é melhor não é ?"""),
+    (4, 
+"""
+Uma vez me disseram que pessoas iteligentes são aquelas que estão 
+sempre disponiveis pra conversar e escutar novas propostas...
+eu sei que você precisa de um celular e eu tambem seu que você é uma pessoa inteligente não é ?"""),
+    (5, 
+"""Você é inteligente é ?""")
+]
+
+def save_conversation_state(sender_number: str, last_user_message: str, 
+                           last_bot_message: str, stage: int, last_activity: datetime):
+    qualified = stage >= 3
+
+    data = {
+        "phone": sender_number,
+        "last_user_message": last_user_message,
+        "last_bot_message": last_bot_message,
+        "stage": stage,
+        "last_activity": last_activity.isoformat(),
+        "next_reminder": (last_activity + timedelta(minutes=REACTIVATION_SEQUENCE[0][0])).isoformat(),
+        "reminder_step": 0,
+        "qualified": qualified  # Agora calculado corretamente
+    }
+    
+    
+    try:
+        # Upsert no Supabase
+        supabase.table("conversation_states").upsert(data).execute()
+    except Exception as e:
+        logger.error(f"Erro ao salvar estado no Supabase: {str(e)}")
+
+def update_reminder_step(phone: str, step: int):
+    try:
+        next_reminder_time = datetime.now(pytz.utc) + timedelta(minutes=REACTIVATION_SEQUENCE[step][0])
+        supabase.table("conversation_states").update({
+            "reminder_step": step,
+            "next_reminder": next_reminder_time.isoformat(),
+            "qualified": False
+        }).eq("phone", phone).execute()
+    except Exception as e:
+        logger.error(f"Erro ao atualizar passo de lembrete: {str(e)}")
+
+# Função para enviar mensagens de reativação
+def send_reactivation_message():
+    while True:
+        try:
+            now = datetime.now(pytz.utc)
+            result = supabase.table("conversation_states").select("*").lte("next_reminder", now.isoformat()).eq("qualified", False).execute()
+            
+            for row in result.data:
+                phone = row["phone"]
+                step = row["reminder_step"]
+                
+                if step < len(REACTIVATION_SEQUENCE):
+                    message = REACTIVATION_SEQUENCE[step][1]
+                    send_whatsapp_message(phone, message)
+                    
+                    # Atualizar para o próximo passo
+                    new_step = step + 1
+                    if new_step < len(REACTIVATION_SEQUENCE):
+                        update_reminder_step(phone, new_step)
+                    else:
+                        # Remover da lista de acompanhamento
+                        supabase.table("conversation_states").delete().eq("phone", phone).execute()
+        
+        except Exception as e:
+            logger.error(f"Erro no envio de reativação: {str(e)}")
+        
+        # Verificar a cada minuto
+        time.sleep(60)
+
+##################################################### FIM SUPABASE ##########################################################################################
+
 def cleanup_expired_histories():
     while True:
         current_time = time.time()
@@ -293,6 +408,15 @@ def process_user_message(sender_number: str, message: str, name: str):
     logging.info(f'RESPONSE: {response_content}')
     if response_content.strip() != "#no-answer":
         send_whatsapp_message(sender_number, response_content)
+        current_stage = conversation_history[sender_number]['stage']
+        save_conversation_state(
+            sender_number=sender_number,
+            last_user_message=message,
+            last_bot_message=response_content,
+            stage=current_stage,
+            last_activity=datetime.now(pytz.utc)
+        )
+        
 
 def is_qualification_detected(response_text: str, conversation_stage: int) -> bool:
     logging.info(f"Verificando qualificação para Estágio: {conversation_stage}")
@@ -498,10 +622,6 @@ def get_info(history: list) -> str:
 
 
 def get_custom_prompt(query, history_str, intent):
-    nome_do_agent = 'Papagaio'
-    nome_da_loja = 'Mr Shop'
-    horario_atendimento = '9h às 18h de Segunda a Sabado'
-    endereco_da_loja = 'Av. Pres. Carlos Luz - Pirapetinga, MG, 36730-000' 
 
     flow = f"""
     ## 🧭 Missão
@@ -818,11 +938,20 @@ async def messages_upsert(request: Request):
     else:
         message_buffer.add_message(full_jid, message, name)
 
+        try:
+            supabase.table("conversation_states").delete().eq("phone", sender_number).execute()
+        except Exception as e:
+            logger.error(f"Erro ao resetar reativação: {str(e)}")
+
     return JSONResponse(content={"status": "received"}, status_code=200)
 
 if __name__ == "__main__":
     cleanup_thread = threading.Thread(target=cleanup_expired_histories, daemon=True)
     cleanup_thread.start()
+
+    # Iniciar thread de reativação
+    reactivation_thread = threading.Thread(target=send_reactivation_message, daemon=True)
+    reactivation_thread.start()
 
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8080)
