@@ -221,7 +221,7 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 # Sequência de reativação (tempo em minutos, mensagem)
 REACTIVATION_SEQUENCE = [
     (1, 
-"""Eu não vou aceitar que voçê suma!
+f"""Eu não vou aceitar que voçê suma!
 Aqui, na {nome_da_loja} a gente valoriza muito todas as pessoas que entram em contato com a gente!
 
 Você tá precisando comprar o sey celylar em um lugar que te entregue, qualidade e preço justo...
