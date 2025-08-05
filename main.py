@@ -37,8 +37,21 @@ import spacy
 from spacy.matcher import Matcher
 from collections import defaultdict
 
+import base64
+import hashlib
+from Crypto.Cipher import AES
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from cryptography.hazmat.primitives import hashes
+import tempfile
+import openai
+
 load_dotenv()
-HISTORY_EXPIRATION_MINUTES = 5 
+HISTORY_EXPIRATION_MINUTES = 10
+
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+EVOLUTION_API_KEY = os.getenv("EVO_API_KEY")
+EVOLUTION_SERVER_URL = 'https://saraevo-evolution-api.jntduz.easypanel.host/'  # Ex.: https://meu-servidor-evolution.com
+
 
 bot_active_per_chat = defaultdict(lambda: True)  # Estado do bot por número do cliente
 AUTHORIZED_NUMBERS = ['554108509968']
@@ -185,6 +198,7 @@ def is_technical_question(text: str) -> bool:
     ]
     text_lower = text.lower()
     return any(keyword in text_lower for keyword in technical_keywords)
+
 
 ########################################################################## FIM RAG SYSTEM #######################################################################################
 
@@ -389,6 +403,59 @@ CONVERSATION_STATES = {
     "CLOSED": 4
 }
 
+##########################################################################  Transcrição de áudio ##########################################################################################
+from openai import OpenAI
+client = OpenAI(api_key=OPENAI_API_KEY)
+
+def buscar_midia_por_id(instance: str, message_id: str) -> str:
+    """
+    Busca o áudio em base64 usando o Evolution API.
+    """
+    try:
+        url = f"{EVOLUTION_SERVER_URL}/media/{instance}/{message_id}"
+        headers = {"apikey": EVOLUTION_API_KEY}
+        logger.info(f"🔄 Buscando mídia no Evolution API: {url}")
+        response = requests.get(url, headers=headers)
+
+        if response.status_code == 200:
+            data = response.json()
+            base64_audio = data.get("media", {}).get("base64")
+            if base64_audio:
+                logger.info("✅ Base64 encontrado via API Evolution.")
+                return base64_audio
+            else:
+                logger.warning("⚠️ API retornou, mas sem campo base64.")
+        else:
+            logger.error(f"❌ Erro ao buscar mídia: {response.status_code} - {response.text}")
+    except Exception as e:
+        logger.error(f"❌ Exceção ao buscar mídia: {e}")
+    return None
+
+# === Função para transcrever áudio ===
+def transcrever_audio_base64(audio_base64: str) -> str:
+    """
+    Transcreve áudio a partir de um base64 usando Whisper.
+    """
+    try:
+        audio_bytes = base64.b64decode(audio_base64)
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".ogg") as tmp_file:
+            tmp_file.write(audio_bytes)
+            tmp_path = tmp_file.name
+
+        logger.info(f"📁 Arquivo de áudio salvo temporariamente em {tmp_path}")
+
+        with open(tmp_path, "rb") as audio_file:
+            transcript = client.audio.transcriptions.create(
+                model="gpt-4o-mini-transcribe",  # ou whisper-1
+                file=audio_file
+            )
+
+        return transcript.text
+    except Exception as e:
+        logger.error(f"❌ Erro na transcrição: {e}")
+        return None
+    
 ########################################################################## INICIO LLM ###############################################################################################
 
 # Habilitar chave da OpenAI
@@ -431,6 +498,9 @@ def get_info(history: list) -> str:
 
 
 def get_custom_prompt(query, history_str, intent):
+    nome_da_loja = 'Mr Shop'
+    horario_atendimento = '9h às 18h de Segunda a Sabado'
+
     flow = f"""
     # 📋 Diretrizes para o Agente Virtual "Papagaio"
 
@@ -508,11 +578,45 @@ def get_custom_prompt(query, history_str, intent):
     ### 1. Abertura
     Apresente-se imediatamente como uma IA para definir as expectativas do cliente.
 
-    > "Oi! Eu sou o Papagaio 🦜, a inteligência artificial da Popeye Celulares. Tô aqui pra iniciar seu atendimento, beleza?"
+    > "Oi! Eu sou o Papagaio 🦜, a inteligência artificial da {nome_da_loja}. Tô aqui pra iniciar seu atendimento, beleza?"
 
     ---
 
-    ### 2. INSTRUÇÕES PARA VERIFICAÇÃO DE ENTRADA e PREÇO
+    ### 2. Autoridade Cruzada
+    > "Como você conheceu a gente? Foi por indicação? Pergunto porque hoje 80% das nossas vendas são por indicação."
+
+    ---
+
+    ### 3. Qualificação
+
+    **A. Orçamento**
+    > "Qual faixa de preço você tem em mente pra esse aparelho?"
+
+    **B. Entrada**
+    > "Você gostaria de dar aparelho pra dar como entrada?"
+     * Se o cliente responder que sim, pergunte qual modelo ele gostaria de dar como entrada e siga as regras abaixo:
+        1. Consulte imediatamente a `<knowledge-base>`
+        2. Siga estas regras estritamente:
+            - Se o campo `aceita_como_entreda` for "SIM": 
+                    > "Sim, aceitamos seu modelo como entrada! 🎉"
+            - Se o campo estiver vazio ou diferente de "SIM": 
+                    > "No momento não estamos aceitando modelo como entrada"
+            - Se o modelo não for encontrado: 
+                    > "No momento não estamos aceitando modelo como entrada"
+
+     * Se o cliente responder que não:
+        > Siga o fluxo
+
+
+    **C. Urgência**
+    > "Tá pensando em comprar pra quando?"
+
+    Se **sem pressa**, diga:
+    > "O dólar tá subindo, então pode ser que os preços aumentem nas próximas semanas."
+
+    ---
+
+    ### 4. INSTRUÇÕES PARA VERIFICAÇÃO DE ENTRADA e PREÇO
     # Se o cliente perguntar sobre troca ou entrada de aparelho, siga estas regras:
         1. Consulte imediatamente a `<knowledge-base>`
         2. Siga estas regras estritamente:
@@ -538,26 +642,6 @@ def get_custom_prompt(query, history_str, intent):
         - Se o preço mencionado pelo cliente estiver proximo ao preço novo ou semi-novo:
             > "Sim, temos `MODELO MENCIONADO PELO CLIENTE` disponível nessa faixa de preço." 
 
-    ---
-
-    ### 3. Autoridade Cruzada
-    > "Como você conheceu a gente? Foi por indicação? Pergunto porque hoje 80% das nossas vendas são por indicação."
-
-    ---
-
-    ### 4. Qualificação
-
-    **A. Orçamento**
-    > "Qual faixa de preço você tem em mente pra esse aparelho?"
-
-    **B. Urgência**
-    > "Tá pensando em comprar pra quando?"
-
-    Se **sem pressa**, diga:
-    > "O dólar tá subindo, então pode ser que os preços aumentem nas próximas semanas."
-
-    ---
-
     ### 5. Consulta de Estoque
 
     **Nunca diga “vou verificar”**. Com base na `<knowledge-base>`, informe o cliente.
@@ -582,9 +666,11 @@ def get_custom_prompt(query, history_str, intent):
     ---
 
     ### 7. Encaminhamento para Lead Quente
+    > Construa uma mensagem de resposta basedo no exemplo abaixo, mas personalize com as informações do lead, data e hora atual comparando com o horario de atendimento da loja.
+    
+    Exemplo de mensagem:
+    "Show! Já chamei um vendedor nosso aqui no WhatsApp. Ele vai cuidar de você com uma condição especial, beleza? Lembrando que nosso horario de atendimento é {horario_atendimento}, ele te chama logo mais!"
 
-    Diga:
-    > "Show! Já chamei um vendedor nosso aqui no WhatsApp. Ele vai cuidar de você com uma condição especial, beleza?"
     Use a ferramenta **Envio para Grupo de Leads Quentes** com:
 
     ```
@@ -715,7 +801,7 @@ def send_whatsapp_message(number: str, text: str):
         "text": text
     }
     headers = {
-        "apikey": os.getenv("EVO_API_KEY"),
+        "apikey": EVOLUTION_API_KEY,
         "Content-Type": "application/json"
     }
     response = requests.post(url, json=payload, headers=headers)
@@ -728,17 +814,42 @@ async def messages_upsert(request: Request):
     full_jid = data['data']['key']['remoteJid']
     msg_type = data['data']['messageType']
 
+    logging.info(f"MSG RECEIVED: {data}")
+
     if msg_type == 'imageMessage':
         send_whatsapp_message(full_jid, "Desculpe, não consigo abrir imagens. Por favor, envie a mensagem em texto.")
         return JSONResponse(content={"status": "image ignored"}, status_code=200)
+    elif msg_type == 'audioMessage':
+        message = data['data']['message']
+        base64_audio = message.get("base64")
 
-    name = data['data']['pushName']
-    
-    sender_number = full_jid.split('@')[0]
-    message = data['data']['message']['conversation']
+        if not base64_audio:
+            logger.warning("⚠️ Webhook sem base64, buscando via API Evolution...")
+            instance = data.get("instance") or data.get("instance") or "default"
+            message_id = data.get("key", {}).get("id")
+            if instance and message_id:
+                base64_audio = buscar_midia_por_id(instance, message_id)
+            else:
+                logger.error("❌ Não foi possível obter instance ou message_id para buscar mídia.")
+        
+        if base64_audio:
+            logger.info("🎙️ Iniciando transcrição...")
+            message = transcrever_audio_base64(base64_audio)
+            if message:
+                logger.info(f"📝 Transcrição: {message}")
+            else:
+                logger.warning("⚠️ Não foi possível transcrever o áudio.")
+        else:
+            logger.warning("⚠️ Nenhum áudio disponível para transcrição.")
+    else:        
+        
+        sender_number = full_jid.split('@')[0]
+        message = data['data']['message']['conversation']   
 
     bot_sender = data['sender']
     bot_number = bot_sender.split('@')[0]
+    
+    name = data['data']['pushName']
 
     #logger.info(f"MSG RECEIVED FROM {sender_number}: {message}")
     
@@ -754,24 +865,15 @@ async def messages_upsert(request: Request):
         send_whatsapp_message(bot_number, "🤖 Bot reativado para conversa com {sender_number}! Agora estou respondendo normalmente")
         return JSONResponse(content={"status": f"maintenance on for {sender_number}"}, status_code=200)
     
-    # Se o bot estiver inativo, ignorar mensagens
-    with bot_state_lock:
-        if not bot_active_per_chat[sender_number]:
-            logger.info(f"Ignorando mensagem de {sender_number} - Bot inativo para este número")
-            return JSONResponse(content={"status": f"ignored - bot inactive for {sender_number}"}, status_code=200)
-    
     # Adiciona mensagem ao buffer
     #message_buffer.add_message(full_jid, message, name)  # Alterado para usar full_jid
 
     #return JSONResponse(content={"status": "received"}, status_code=200)
 
-    logging.info(f"Received message from {full_jid}: {data['data']['message']}")
-    if 'imageMessage' in data['data']['message']:
-        send_whatsapp_message(full_jid, "Desculpe, não consigo abrir imagens. Por favor, envie a mensagem em texto.")
-    else:
-        message = data['data']['message']['conversation']
-        # Adiciona mensagem ao buffer em vez de processar diretamente
-        message_buffer.add_message(full_jid, message, name)
+    #logging.info(f"Received message from {full_jid}: {data['data']['message']}")
+
+    # Adiciona mensagem ao buffer em vez de processar diretamente
+    message_buffer.add_message(full_jid, message, name)
 
     return JSONResponse(content={"status": "received"}, status_code=200)
 
