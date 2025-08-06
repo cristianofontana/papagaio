@@ -220,36 +220,36 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # Sequência de reativação (tempo em minutos, mensagem)
 REACTIVATION_SEQUENCE = [
-    (1, 
-f"""Eu não vou aceitar que voçê suma!
+    (480, 
+f"""Eu não vou aceitar que você suma!
 Aqui, na {nome_da_loja} a gente valoriza muito todas as pessoas que entram em contato com a gente!
 
-Você tá precisando comprar o sey celylar em um lugar que te entregue, qualidade e preço justo...
+Você tá precisando comprar o seu celular em um lugar que te entregue, qualidade e preço justo...
 e isso nós temos de sobra!!!
 a gente pode se ajudar!!!
 me da 5 minutos da sua atenção que eu resolvo sua vida!"""),
-    (2, 
+    (960, 
 """Como eu te disse ontem... Eu não vou te abandonar... Ou voce me dá atenção
 ou eu vou descobrir onde voce mora e ir ai na sua casa!!!
 KKKKKKKKKKKK
-me ajuda a te ajudar!!! Eu preciso bater a meta e voce precisa de um novo CELULAR!!!"""),
-    (3, 
+me ajuda a te ajudar!!! Eu preciso bater a meta e você precisa de um novo CELULAR!!!"""),
+    (960*2, 
 """Você tem dois caminhos:
-primeiro: Você vai ver essa mensagem, e vai me ignorar e a gente
+Primeiro Caminho: Você vai ver essa mensagem, e vai me ignorar e a gente
 nunca mais vai conversar... Provavelmente você vai comprar em outra loja,
 essa loka, vai te prometer mundos e fundos, mas na hora que você precisar,
 ELES VÃO SUMIR...
 
 Segundo Caminho: Você me da 5 minutos da sua atenção, tempo suficiente 
 pra eu provar que você está na loja certa... Te vendo um produto no preço 
-justo e com toda a qualidade do mundo e você vira cliente fiel!
+justo, e com toda a qualidade do mundo, e você vira cliente fiel!
 o segundo caminho é melhor não é ?"""),
-    (4, 
+    (960*4, 
 """
-Uma vez me disseram que pessoas iteligentes são aquelas que estão 
+Uma vez me disseram que pessoas inteligentes são aquelas que estão 
 sempre disponiveis pra conversar e escutar novas propostas...
 eu sei que você precisa de um celular e eu tambem seu que você é uma pessoa inteligente não é ?"""),
-    (5, 
+    (960*8, 
 """Você é inteligente é ?""")
 ]
 
@@ -911,9 +911,10 @@ async def messages_upsert(request: Request):
             logger.warning("⚠️ Nenhum áudio disponível para transcrição.")
     else:        
         
-        sender_number = full_jid.split('@')[0]
+        
         message = data['data']['message']['conversation']   
 
+    sender_number = full_jid.split('@')[0]
     bot_sender = data['sender']
     bot_number = bot_sender.split('@')[0]
     
@@ -932,6 +933,7 @@ async def messages_upsert(request: Request):
             bot_active_per_chat[sender_number] = True
         send_whatsapp_message(bot_number, "🤖 Bot reativado para conversa com {sender_number}! Agora estou respondendo normalmente")
         return JSONResponse(content={"status": f"maintenance on for {sender_number}"}, status_code=200)
+        
     
     if not bot_active_per_chat[sender_number]:
         logging.info(f"Ignorando mensagem de {sender_number} - Bot inativo para este número")
