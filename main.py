@@ -53,9 +53,7 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 EVOLUTION_API_KEY = os.getenv("EVO_API_KEY")
 EVOLUTION_SERVER_URL = 'https://saraevo-evolution-api.jntduz.easypanel.host/'  # Ex.: https://meu-servidor-evolution.com
 
-
 bot_active_per_chat = defaultdict(lambda: True)  # Estado do bot por número do cliente
-AUTHORIZED_NUMBERS = ['554108509968']
 bot_state_lock = Lock()  # Lock para sincronização de estado
 
 # ================== API FastAPI ================== #
@@ -75,17 +73,51 @@ patterns = [
 ]
 
 ################################# CONFIG PERSONALIZADA CLIENTE #################################
-nome_do_agent = 'Sara'
-nome_da_loja = 'Mr Shop'
-horario_atendimento = '9h às 18h de Segunda a Sabado'
-endereco_da_loja = 'Av. Pres. Carlos Luz - Pirapetinga, MG, 36730-000' 
-metodo_de_pagamento = {
-    'iphone': {'a vista e cartao'},
-    'Android': {'a vista, cartao, boleto'},
-    'Outros': {'a vista, cartao, boleto'}
-}
-categorias_atendidas = 'Iphone, Ipad, Xiaomi, Realme, Poco e Acessórios'
-lugares_que_faz_entrega = ''
+def load_client_config(client_id: str) -> dict:
+    try:
+        response = supabase.table("client_config") \
+            .select("*") \
+            .eq("client_id", client_id) \
+            .limit(1) \
+            .execute()
+        
+        if response.data:
+            config = response.data[0]
+            return {
+                'nome_do_agent': config.get('nome_do_agent', 'Agente'),
+                'nome_da_loja': config.get('nome_da_loja', 'Loja'),
+                'horario_atendimento': config.get('horario_atendimento', 'Seg a Sex 9:00-18:00'),
+                'endereco_da_loja': config.get('endereco_da_loja', 'Endereço não especificado'),
+                'categorias_atendidas': config.get('categorias_atendidas', 'Produtos em geral'),
+                'lugares_que_faz_entrega': config.get('lugares_que_faz_entrega', ''),
+                'forma_pagamento_iphone': config.get('forma_pagamento_iphone', 'à vista ou parcelado'),
+                'forma_pagamento_android': config.get('forma_pagamento_android', 'à vista ou parcelado'),
+                'collection_name': config.get('collection_name', 'default_collection'),
+                'authorized_numbers': config.get('authorized_numbers', [])
+            }
+        else:
+            logger.error(f"Configuração não encontrada para cliente: {client_id}")
+            return {}
+    except Exception as e:
+        logger.error(f"Erro ao carregar configuração: {str(e)}")
+        return {}
+
+# Carregar configurações do Supabase
+CLIENT_ID = 'papagaio'  # ID do cliente no Supabase
+client_config = load_client_config(CLIENT_ID)
+
+# Usar valores padrão se a configuração não for encontrada
+nome_do_agent = client_config.get('nome_do_agent', 'Eduardo')
+nome_da_loja = client_config.get('nome_da_loja', 'Five Store')
+horario_atendimento = client_config.get('horario_atendimento', 'Seg a Sex 10:00Hrs às 18:00Hrs | Sab 9:00Hrs às 12:00Hrs | Dom Fechado')
+endereco_da_loja = client_config.get('endereco_da_loja', 'Av. Jânio da Silva Quadros, 209, Quatá - SP, 19780-035')
+categorias_atendidas = client_config.get('categorias_atendidas', 'Iphone e Acessórios')
+lugares_que_faz_entrega = client_config.get('lugares_que_faz_entrega', '')
+forma_pagamento_iphone = client_config.get('forma_pagamento_iphone', 'à vista e cartão em até 21X')
+forma_pagamento_android = client_config.get('forma_pagamento_android', 'à vista, no cartão em até 21X ou boleto')
+COLLECTION_NAME = client_config.get('collection_name', 'five_store')
+cliente_evo = 'papagaio'#COLLECTION_NAME
+AUTHORIZED_NUMBERS = client_config.get('authorized_numbers', ['554196137682','553591009992','556599957004','554195780059','551915629331','554299770630'])
 
 for pattern in patterns:
     matcher.add("TRANSFER_PATTERNS", [pattern])
@@ -93,7 +125,7 @@ for pattern in patterns:
 
 # Adicione esta classe antes da definição do app
 class MessageBuffer:
-    def __init__(self, timeout=10):
+    def __init__(self, timeout=20):
         self.timeout = timeout
         self.buffers: Dict[str, Dict[str, Any]] = {}
         self.lock = threading.Lock()
@@ -143,7 +175,6 @@ from qdrant_client import QdrantClient
 # Configurações do Qdrant
 QDRANT_URL = os.getenv("QDRANT_URL")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
-COLLECTION_NAME = "produtos"  # Nome da coleção que você criou
 EMBEDDING_MODEL = "text-embedding-3-small"  # Modelo usado para embeddings
 
 # Inicializar cliente Qdrant
@@ -214,7 +245,31 @@ def is_technical_question(text: str) -> bool:
     return any(keyword in text_lower for keyword in technical_keywords)
 
 
-########################################################################## FIM RAG SYSTEM #######################################################################################
+########################################################################## Inicio Delete Message #######################################################################################
+
+# === Função para deletar mensagem ===
+def deletar_mensagem(message_id: str, remote_jid: str, from_me: bool):
+    headers = {
+        "apikey": EVOLUTION_API_KEY,
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "id": message_id,
+        "remoteJid": remote_jid,
+        "fromMe": from_me
+    }
+
+    logger.info(f"🗑️ Deletando mensagem {message_id} de {remote_jid} (fromMe={from_me})")
+
+    url_evo = f'{EVOLUTION_SERVER_URL}chat/deleteMessageForEveryone/{cliente_evo}'
+    #https://saraevo-evolution-api.jntduz.easypanel.host/chat/deleteMessageForEveryone/ReconvertAI
+    #https://saraevo-evolution-api.jntduz.easypanel.host/chat/deleteMessageForEveryone/papagaio
+    logging.info(f'URL_EVO -> {url_evo}')
+
+    resp = requests.delete(url_evo, headers=headers, json=payload)
+    logger.info(f"Resposta deleção: {resp.status_code} - {resp.text}")
+    return resp.ok
+
 
 ############################################################# INICIO SUPABASE ##########################################################################################
 SUPABASE_URL = os.getenv("SUPABASE_URL")
@@ -625,15 +680,10 @@ def get_info(history: list) -> str:
 
 
 def get_custom_prompt(query, history_str, intent):
-    nome_do_agent = 'Sara'
-    nome_da_loja = 'Mr Shop'
-    horario_atendimento = '9h às 18h de Segunda a Sabado'
-    endereco_da_loja = 'Av. Pres. Carlos Luz - Pirapetinga, MG, 36730-000' 
-    categorias_atendidas = 'Iphone, Ipad, Xiaomi, Realme, Poco, Acessórios'
 
     flow = f"""
     ## 🧭 Missão
-    Você é o {nome_do_agent}, agente virtual da loja de celulares {nome_da_loja}. Sua função é **qualificar leads automaticamente usando o método abaixo** e, se estiverem qualificados, encaminhá-los para um especialista humano finalizar a venda.
+    Você é o(a) {nome_do_agent}, agente virtual da loja de celulares {nome_da_loja}. Sua função é **qualificar leads automaticamente usando o método abaixo** e, se estiverem qualificados, encaminhá-los para um especialista humano finalizar a venda.
     
     ### Etapas de qualificação
     > Para Celulares 
@@ -656,7 +706,7 @@ def get_custom_prompt(query, history_str, intent):
 
     ### 1. 👋 Abertura
     Inicie a conversa se apresentando:
-    > Oiii, tudo bem ? Quem ta falando é a {nome_do_agent}, , a IA da {nome_da_loja}! Eu estou pronta para te ajudar!!!
+    > Oiii, tudo bem ? Quem ta falando é o(a) {nome_do_agent}, , a IA da {nome_da_loja}! Eu estou pronta para te ajudar!!!
 
     > Me conta ai, o que está procucando hoje, aqui trabalhamos com: {categorias_atendidas}
 
@@ -717,27 +767,34 @@ def get_custom_prompt(query, history_str, intent):
     ---
 
     ### 4. 🔁 Entrada de Aparelho (APENAS iPHONE)
-    Se o cliente estiver interessado em um **iPhone**, pergunte:
+    Se o cliente estiver interessado em um iPhone, pergunte:
     > "Você pretende usar o seu iPhone atual como parte do pagamento?"
 
     - Se o cliente disser **sim**:
         - Pergunte:
-        > "Qual o modelo do seu aparelho atual?"
+        > "Qual o modelo exato do seu aparelho? (Ex: iPhone 11 Pro Max, iPhone SE 2020)"
+        
+        - **Validação rigorosa**:
+            1. Consulte a **Base de Conhecimento** procurando pelo **modelo exato** informado
+            2. Se não encontrar:
+                - Verifique equivalências conhecidas:
+                    - "iPhone X" → "iPhone 10" (e vice-versa)
+                    - "iPhone 11 Pro" ≠ "iPhone 11" (modelos diferentes)
+            3. Critérios de aceite:
+                - ✅ APENAS se encontrar registro COM `aceita_como_entrada = "SIM"`
+                - ❌ Caso contrário: rejeite
 
-        - Verifique no **Vector DB** se o modelo informado é aceito como entrada (`aceita_como_entreda = "SIM"`).
-
-        - Responda de acordo:
-            - ✅ Se for aceito:
+        - Responda **baseada estritamente nos resultados**:
+            - Se encontrou modelo equivalente válido:
             > "Perfeito! Esse modelo é aceito como entrada sim."
-
-            - ❌ Se **não** for aceito:
-            > "Esse modelo infelizmente não conseguimos aceitar como entrada, mas posso te ajudar com outras formas de pagamento, pode ser?"
-
-        - Depois, pergunte:
-        > "Você saberia me dizer como está a saúde da bateria? E se o aparelho já foi aberto, tem riscos ou trincados?"
+            > "Você saberia me dizer como está a saúde da bateria? E se o aparelho já foi aberto, tem riscos ou trincados?"
+            
+            - Se **não encontrou** ou modelo inválido:
+            > "No momento não estamos aceitando iPhone X/10 como entrada, mas posso te ajudar com outras formas de pagamento! Quer prosseguir?"
+            > *[Aguarde resposta antes de avançar]*
 
     - Se o cliente disser **não**:
-        > "Beleza! Você só quer ver esse modelo ? Ou tem mais algum que você quer dar uma olhada ?"
+        > "Beleza! Você só quer ver esse modelo ou tem mais algum que queira dar uma olhada?"
 
     ---
     ### 5. 💳 Validação de Pagamento (APENAS CELULARES)
@@ -745,18 +802,19 @@ def get_custom_prompt(query, history_str, intent):
 
     #### Para iPhone:
     > "Para finalizar, você prefere pagar à vista ou no cartão?"
-    - se o cliente perguntar sobre boleto, fale: "Para iPhones trabalhamos apenas com à vista ou cartão. Qual dessas prefere?"
+    - se o cliente perguntar sobre boleto, fale: "Para iPhones trabalhamos apenas com {forma_pagamento_iphone}. Qual dessas prefere?"
 
-    - **Formas aceitas:** à vista ou cartão
+
+    - **Formas aceitas:** {forma_pagamento_iphone}
     - Se cliente sugerir outra forma:
-    > "Para iPhones trabalhamos apenas com à vista ou cartão. Qual dessas prefere?"
+    > "Para iPhones trabalhamos apenas com: {forma_pagamento_iphone}. Qual dessas prefere?"
 
     #### Para Android:
-    > "Para finalizar, você prefere pagar à vista, no cartão ou boleto?"
+    > "Para finalizar, você prefere pagar {forma_pagamento_android}?"
 
-    - **Formas aceitas:** à vista, cartão ou boleto
+    - **Formas aceitas:** {forma_pagamento_android}
     - Se cliente sugerir outra forma:
-    > "Para Androids aceitamos à vista, cartão ou boleto. Qual dessas formas se encaixa melhor?"
+    > "Para Androids aceitamos {forma_pagamento_android}. Qual dessas formas se encaixa melhor?"
 
     #### Para outros produtos:
     - Não perguntar sobre forma de pagamento
@@ -879,7 +937,7 @@ def get_text_message_input(recipient, text):
     )
 
 def send_whatsapp_message(number: str, text: str):
-    url = "https://saraevo-evolution-api.jntduz.easypanel.host/message/sendText/papagaio"
+    url = f"https://saraevo-evolution-api.jntduz.easypanel.host/message/sendText/{cliente_evo}"
     payload = {
         "number": number,
         "text": text
@@ -894,11 +952,20 @@ def send_whatsapp_message(number: str, text: str):
 
 @app.post("/messages-upsert")
 async def messages_upsert(request: Request):
-    data = await request.json()
+    data = await request.json() #body
     full_jid = data['data']['key']['remoteJid']
     msg_type = data['data']['messageType']
+    msg_id = data['data']['key']['id']
+    from_me_flag = data['data']['key']['fromMe'] 
 
     logging.info(f"MSG RECEIVED: {data}")
+
+    padrao = r'\d{12}'
+    numero = re.search(padrao, full_jid)
+
+    if numero.group(0) not in AUTHORIZED_NUMBERS:
+        logging.info(f'Numero nao cadastrado na whitelist - {numero.group(0)}')
+        return JSONResponse(content={"status": "number ignored"}, status_code=200)
 
     if msg_type == 'imageMessage':
         send_whatsapp_message(full_jid, "Desculpe, não consigo abrir imagens. Por favor, envie a mensagem em texto.")
@@ -908,8 +975,9 @@ async def messages_upsert(request: Request):
         base64_audio = message.get("base64")
 
         if not base64_audio:
-            logger.warning("⚠️ Webhook sem base64, buscando via API Evolution...")
+            logger.warning(f"⚠️ Webhook sem base64, buscando via API Evolution... {data}")
             instance = data.get("instance") or data.get("instance") or "default"
+            logging.info(f'INSTANCE -> {instance}')
             message_id = data.get("key", {}).get("id")
             if instance and message_id:
                 base64_audio = buscar_midia_por_id(instance, message_id)
@@ -923,11 +991,13 @@ async def messages_upsert(request: Request):
                 logger.info(f"📝 Transcrição: {message}")
             else:
                 logger.warning("⚠️ Não foi possível transcrever o áudio.")
+                send_whatsapp_message(full_jid, "Desculpe, estou tendo dificuldades com este audio. Se possivel envie sua mensagem em texto.")
+                return JSONResponse(content={"status": "number ignored"}, status_code=200)
         else:
             logger.warning("⚠️ Nenhum áudio disponível para transcrição.")
+            send_whatsapp_message(full_jid, "Desculpe, estou tendo dificuldades com este audio. Se possivel envie sua mensagem em texto.")
+            return JSONResponse(content={"status": "number ignored"}, status_code=200)
     else:        
-        
-        
         message = data['data']['message']['conversation']   
 
     sender_number = full_jid.split('@')[0]
@@ -939,12 +1009,14 @@ async def messages_upsert(request: Request):
     #logger.info(f"MSG RECEIVED FROM {sender_number}: {message}")
     
     if message.strip().lower() == "#off":
+        deletar_mensagem(msg_id, full_jid, from_me_flag)
         with bot_state_lock:
             bot_active_per_chat[sender_number] = False
         send_whatsapp_message(bot_number, "🤖 Bot desativado para conversa com {sender_number}. Não responderei novas mensagens até ser reativado com #on")
         return JSONResponse(content={"status": f"maintenance off for {sender_number}"}, status_code=200)
 
     elif message.strip().lower() == "#on":
+        deletar_mensagem(msg_id, full_jid, from_me_flag)
         with bot_state_lock:
             bot_active_per_chat[sender_number] = True
         send_whatsapp_message(bot_number, "🤖 Bot reativado para conversa com {sender_number}! Agora estou respondendo normalmente")
@@ -968,8 +1040,8 @@ if __name__ == "__main__":
     cleanup_thread.start()
 
     # Iniciar thread de reativação
-    reactivation_thread = threading.Thread(target=send_reactivation_message, daemon=True)
-    reactivation_thread.start()
+    #reactivation_thread = threading.Thread(target=send_reactivation_message, daemon=True)
+    #reactivation_thread.start()
 
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8080)

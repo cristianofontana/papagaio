@@ -7,6 +7,8 @@ from langchain_openai import OpenAIEmbeddings
 
 load_dotenv()
 
+collection_name = 'five_store'
+
 def create_documents(df):
     """Transforma o CSV em documentos para embedding"""
     documents = []
@@ -27,7 +29,7 @@ def create_documents(df):
 
 def main():
     # Carregar dados com delimitador correto
-    df = pd.read_csv("iphones.csv", delimiter=';', encoding='utf-8-sig')
+    df = pd.read_csv("five_store.csv", delimiter=';', encoding='utf-8-sig')
     
     # Converter preços para string
     df['preco_novo'] = df['preco_novo'].astype(str)
@@ -46,7 +48,6 @@ def main():
     )
     
     # Criar collection se não existir
-    collection_name = "produtos"
     if not client.collection_exists(collection_name):
         client.create_collection(
             collection_name=collection_name,
@@ -81,19 +82,19 @@ def main():
 
 
     client.create_payload_index(
-        collection_name="produtos",
+        collection_name=collection_name,
         field_name="metadata.Item",
         field_schema="text"
     )
 
     client.create_payload_index(
-        collection_name="produtos",
+        collection_name=collection_name,
         field_name="metadata.preco_semi_novo",
         field_schema="text"
     )
 
     client.create_payload_index(
-        collection_name="produtos",
+        collection_name=collection_name,
         field_name="metadata.marca",
         field_schema="text"
     )
