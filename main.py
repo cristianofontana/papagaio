@@ -6,6 +6,7 @@ import json
 import aiohttp
 import asyncio
 import re
+import uuid
 
 import pandas as pd
 from langchain_community.document_loaders import DataFrameLoader
@@ -34,8 +35,8 @@ from threading import Lock
 from typing import Dict, Any, List, Optional, Union
 
 from fastapi.responses import JSONResponse
-import spacy
-from spacy.matcher import Matcher
+#import spacy
+#from spacy.matcher import Matcher
 from collections import defaultdict
 
 import base64
@@ -53,6 +54,10 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 EVOLUTION_API_KEY = os.getenv("EVO_API_KEY")
 EVOLUTION_SERVER_URL = 'https://saraevo-evolution-api.jntduz.easypanel.host/'  # Ex.: https://meu-servidor-evolution.com
 
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
 bot_active_per_chat = defaultdict(lambda: True)  # Estado do bot por número do cliente
 bot_state_lock = Lock()  # Lock para sincronização de estado
 
@@ -61,9 +66,9 @@ app = FastAPI(title="WhatsApp Transcription API")
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-nlp = spacy.load('pt_core_news_sm')
+#nlp = spacy.load('pt_core_news_sm')
 
-matcher = Matcher(nlp.vocab)
+#matcher = Matcher(nlp.vocab)
 
 patterns = [
     [{"LOWER": {"IN": ["passar", "encaminhar", "transferir"]}}, {"LOWER": "para"}, {"LOWER": {"IN": ["gerente", "vendedor", "humano"]}}],
@@ -87,7 +92,7 @@ def load_client_config(client_id: str) -> dict:
                 'nome_do_agent': config.get('nome_do_agent', 'Agente'),
                 'nome_da_loja': config.get('nome_da_loja', 'Loja'),
                 'horario_atendimento': config.get('horario_atendimento', 'Seg a Sex 9:00-18:00'),
-                'endereco_da_loja': config.get('endereco_da_loja', 'Endereço não especificado'),
+                'endereco_da_loja': config.get('endereco_da_loja', 'Endereco nao especificado'),
                 'categorias_atendidas': config.get('categorias_atendidas', 'Produtos em geral'),
                 'lugares_que_faz_entrega': config.get('lugares_que_faz_entrega', ''),
                 'forma_pagamento_iphone': config.get('forma_pagamento_iphone', 'à vista ou parcelado'),
@@ -103,9 +108,12 @@ def load_client_config(client_id: str) -> dict:
         return {}
 
 # Carregar configurações do Supabase
-CLIENT_ID = 'papagaio'  # ID do cliente no Supabase
-client_config = load_client_config(CLIENT_ID)
+CLIENT_ID = 'five_store'  # ID do cliente no Supabase
+def get_client_config() -> dict:
+    client_config = load_client_config(CLIENT_ID)
+    return client_config
 
+client_config = get_client_config()
 # Usar valores padrão se a configuração não for encontrada
 nome_do_agent = client_config.get('nome_do_agent', 'Eduardo')
 nome_da_loja = client_config.get('nome_da_loja', 'Five Store')
@@ -116,11 +124,14 @@ lugares_que_faz_entrega = client_config.get('lugares_que_faz_entrega', '')
 forma_pagamento_iphone = client_config.get('forma_pagamento_iphone', 'à vista e cartão em até 21X')
 forma_pagamento_android = client_config.get('forma_pagamento_android', 'à vista, no cartão em até 21X ou boleto')
 COLLECTION_NAME = client_config.get('collection_name', 'five_store')
-cliente_evo = 'papagaio'#COLLECTION_NAME
-AUTHORIZED_NUMBERS = client_config.get('authorized_numbers', ['554196137682','553591009992','556599957004','554195780059','551915629331','554299770630'])
+cliente_evo = 'papagaio'  #COLLECTION_NAME
+AUTHORIZED_NUMBERS = client_config.get('authorized_numbers', ['554196137682','553591009992','556599957004','554195780059','55111562933','554299770630'])
 
-for pattern in patterns:
-    matcher.add("TRANSFER_PATTERNS", [pattern])
+
+id_grupo_cliente = '120363420079107628@g.us' #120363420079107628@g.us
+
+#for pattern in patterns:
+#    matcher.add("TRANSFER_PATTERNS", [pattern])
 
 
 # Adicione esta classe antes da definição do app
@@ -272,9 +283,6 @@ def deletar_mensagem(message_id: str, remote_jid: str, from_me: bool):
 
 
 ############################################################# INICIO SUPABASE ##########################################################################################
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # Sequência de reativação (tempo em minutos, mensagem)
 REACTIVATION_SEQUENCE = [
@@ -346,6 +354,20 @@ def update_reminder_step(phone: str, step: int):
 
 # Função para enviar mensagens de reativação
 def send_reactivation_message():
+    client_config = get_client_config()
+    # Usar valores padrão se a configuração não for encontrada
+    nome_do_agent = client_config.get('nome_do_agent', 'Eduardo')
+    nome_da_loja = client_config.get('nome_da_loja', 'Five Store')
+    horario_atendimento = client_config.get('horario_atendimento', 'Seg a Sex 10:00Hrs às 18:00Hrs | Sab 9:00Hrs às 12:00Hrs | Dom Fechado')
+    endereco_da_loja = client_config.get('endereco_da_loja', 'Av. Jânio da Silva Quadros, 209, Quatá - SP, 19780-035')
+    categorias_atendidas = client_config.get('categorias_atendidas', 'Iphone e Acessórios')
+    lugares_que_faz_entrega = client_config.get('lugares_que_faz_entrega', '')
+    forma_pagamento_iphone = client_config.get('forma_pagamento_iphone', 'à vista e cartão em até 21X')
+    forma_pagamento_android = client_config.get('forma_pagamento_android', 'à vista, no cartão em até 21X ou boleto')
+    COLLECTION_NAME = client_config.get('collection_name', 'five_store')
+    cliente_evo = 'papagaio'  #COLLECTION_NAME
+    AUTHORIZED_NUMBERS = client_config.get('authorized_numbers', ['554196137682','553591009992','556599957004','554195780059','55111562933','554299770630'])
+
     while True:
         try:
             now = datetime.now(pytz.utc)
@@ -373,6 +395,21 @@ def send_reactivation_message():
         # Verificar a cada minuto
         time.sleep(60)
 
+def save_message_to_history(phone_number: str, sender: str, message: str, conversation_id: str = None):
+    """
+    Salva uma mensagem no histórico do Supabase
+    """
+    try:
+        data = {
+            "phone_number": phone_number,
+            "sender": sender,
+            "message": message,
+            "conversation_id": conversation_id
+        }
+        supabase.table("chat_history").insert(data).execute()
+    except Exception as e:
+        logger.error(f"Erro ao salvar mensagem no histórico: {str(e)}")
+
 ##################################################### FIM SUPABASE ##########################################################################################
 
 def cleanup_expired_histories():
@@ -398,7 +435,14 @@ def cleanup_expired_histories():
 message_buffer = MessageBuffer(timeout=3)
 
 def process_user_message(sender_number: str, message: str, name: str):
-    # Primeiro tente usar uma skill especializada
+
+    # Gerar ID único para a conversa se for uma nova
+    if sender_number not in conversation_history:
+        conversation_id = str(uuid.uuid4())
+    else:
+        conversation_id = conversation_history[sender_number].get('conversation_id', str(uuid.uuid4()))
+    
+    save_message_to_history(sender_number, 'user', message, conversation_id)
     
     # Se nenhuma skill aplicável, continua com o fluxo normal
     current_intent = detect_intent(message)
@@ -429,7 +473,16 @@ def process_user_message(sender_number: str, message: str, name: str):
     conversation_history[sender_number]['messages'].append(response)
     response_content = response.content
 
+    save_message_to_history(sender_number, 'bot', response_content, conversation_id)
+
     logging.info(f"BANT STATUS {conversation_history[sender_number]['bant']}")
+
+    sufixo = "@s.whatsapp.net"
+
+    if sender_number.endswith(sufixo):
+        numero = sender_number[:-len("@s.whatsapp.net")]
+    else:
+        numero = sender_number  # Fallback se não tiver o sufixo
     
     if "orcamento" in response_content.lower() or "orçamento" in response_content.lower():
         conversation_history[sender_number]['stage'] = 2
@@ -447,6 +500,7 @@ def process_user_message(sender_number: str, message: str, name: str):
                 infos = {}
         
         logging.info(f"Informações do lead: {infos}")
+        
 
         interesse = infos.get('INTERESSE', "Produto não especificado")
         budget = infos.get('BUDGET', "Valor não especificado")
@@ -454,14 +508,14 @@ def process_user_message(sender_number: str, message: str, name: str):
         msg_qualificacao = f"""
         Lead Qualificado 🔥:
         Nome: {name},
-        Telefone: {sender_number},
+        Telefone: {numero},
         Interesse: {interesse},
         Budget: {budget},
         Compra urgente.
-        Link: https://wa.me/{sender_number}
+        Link: https://wa.me/{numero}
         """
         
-        send_whatsapp_message('120363420079107628@g.us', msg_qualificacao)
+        send_whatsapp_message(id_grupo_cliente, msg_qualificacao)
     
     logging.info(f'RESPONSE: {response_content}')
     if response_content.strip() != "#no-answer":
@@ -481,8 +535,8 @@ def is_qualification_detected(response_text: str, conversation_stage: int) -> bo
     doc = nlp(response_text.lower())
     
     # 1. Verificação com spaCy Matcher
-    if len(matcher(doc)) > 0:
-        return True
+    #if len(matcher(doc)) > 0:
+    #    return True
     
     # 2. Verificação contextual com palavras-chave
     keywords = {
@@ -660,7 +714,6 @@ def get_info(history: list) -> str:
     6. Se não encontrar interesse claro, retorne: "Produto não especificado".
 
     ### BUDGET
-    1. Extraia o valor que o cliente mencionou como orçamento.
     2. Se não houver menção de valor, retorne: "Valor não especificado".
 
     ## IMPORTANTE
@@ -680,20 +733,33 @@ def get_info(history: list) -> str:
 
 
 def get_custom_prompt(query, history_str, intent):
+    client_config = get_client_config()
+    # Usar valores padrão se a configuração não for encontrada
+    nome_do_agent = client_config.get('nome_do_agent', 'Eduardo')
+    nome_da_loja = client_config.get('nome_da_loja', 'Five Store')
+    horario_atendimento = client_config.get('horario_atendimento', 'Seg a Sex 10:00Hrs às 18:00Hrs | Sab 9:00Hrs às 12:00Hrs | Dom Fechado')
+    endereco_da_loja = client_config.get('endereco_da_loja', 'Av. Jânio da Silva Quadros, 209, Quatá - SP, 19780-035')
+    categorias_atendidas = client_config.get('categorias_atendidas', 'Iphone e Acessórios')
+    lugares_que_faz_entrega = client_config.get('lugares_que_faz_entrega', '')
+    forma_pagamento_iphone = client_config.get('forma_pagamento_iphone', 'à vista e cartão em até 21X')
+    forma_pagamento_android = client_config.get('forma_pagamento_android', 'à vista, no cartão em até 21X ou boleto')
+    COLLECTION_NAME = client_config.get('collection_name', 'five_store')
+    cliente_evo = 'papagaio'  #COLLECTION_NAME
+    AUTHORIZED_NUMBERS = client_config.get('authorized_numbers', ['554196137682','553591009992','556599957004','554195780059','55111562933','554299770630'])
 
     flow = f"""
     ## 🧭 Missão
-    Você é o(a) {nome_do_agent}, agente virtual da loja de celulares {nome_da_loja}. Sua função é **qualificar leads automaticamente usando o método abaixo** e, se estiverem qualificados, encaminhá-los para um especialista humano finalizar a venda.
+    Você é  {nome_do_agent}, agente virtual da loja de celulares {nome_da_loja}. Sua função é **qualificar leads automaticamente usando o método abaixo** e, se estiverem qualificados, encaminhá-los para um especialista humano finalizar a venda.
     
     ### Etapas de qualificação
     > Para Celulares 
-    > Sempre faça o item 5. Validação de Pagamento (APENAS CELULARES)
-    1. Identificação da Necessidade 
-    2. Orçamento [APENAS CELULARES]
-    3. Orçamento [APENAS CELULARES]
-    4. Entrada de Aparelho (APENAS iPHONE)
-    5. Validação de Pagamento (APENAS CELULARES)
-    6. Urgência [APENAS CELULARES]
+    > Sempre faça o item 4. Validação de Pagamento (APENAS CELULARES)
+    1. Abertura 
+    2. Identificação da Necessidade 
+    3. Entrada de Aparelho (APENAS iPHONE)
+    4. Validação de Pagamento (APENAS CELULARES)
+    5. Urgência [APENAS CELULARES]
+    6. Lead Qualificado
 
     > Outros
     2.5 Fluxo Especial para Outros
@@ -706,7 +772,7 @@ def get_custom_prompt(query, history_str, intent):
 
     ### 1. 👋 Abertura
     Inicie a conversa se apresentando:
-    > Oiii, tudo bem ? Quem ta falando é o(a) {nome_do_agent}, , a IA da {nome_da_loja}! Eu estou pronta para te ajudar!!!
+    > Oiii, tudo bem ? Quem ta falando é {nome_do_agent}, a IA da {nome_da_loja}! Eu estou pronta para te ajudar!!!
 
     > Me conta ai, o que está procucando hoje, aqui trabalhamos com: {categorias_atendidas}
 
@@ -728,8 +794,7 @@ def get_custom_prompt(query, history_str, intent):
     > "Olha, temos disponível:"
     > - iPhone 11 
     > - iPhone 13 
-    > - iPhone 15 
-    > - iPhone XR 
+    ...
     > - iPhone 12 
 
     ---
@@ -749,26 +814,10 @@ def get_custom_prompt(query, history_str, intent):
 
     ---
 
-    ### 3. 💰 Orçamento [APENAS CELULARES]
-    Após o cliente indicar um modelo, pergunte:
-    > "Legal! Quanto você está pensando em investir no [Modelo Escolhido]?"
-
-    - Se o cliente perguntar diretamente pelo preço:
-    > "Os valores variam conforme condições de pagamento. Pra te ajudar melhor, qual seria seu investimento máximo?"
-
-    - Quando o cliente informar o valor:
-    - Verifique na **Base de conhecimento** se o preço desejado está próximo do valor real (`preco_novo` ou `preco_semi_novo`).
-    - **Responda de acordo:**
-        - Se estiver próximo:
-        > "Show! Esse valor pode sim ser atendido com o [Modelo Escolhido]."
-        - Se estiver bem abaixo:
-        > "Pode ser que esse valor fique um pouco abaixo do preço atual. Quer ver outras opções parecidas dentro dessa faixa?"
-
-    ---
-
-    ### 4. 🔁 Entrada de Aparelho (APENAS iPHONE)
-    Se o cliente estiver interessado em um iPhone, pergunte:
+    ### 3. 🔁 Entrada de Aparelho (APENAS iPHONE)
+    Se o cliente estiver interessado em um iPhone:
     > "Você pretende usar o seu iPhone atual como parte do pagamento?"
+    *** Faça essa pergunta APENAS se o cliente estiver interessado em um iPhone
 
     - Se o cliente disser **sim**:
         - Pergunte:
@@ -797,7 +846,7 @@ def get_custom_prompt(query, history_str, intent):
         > "Beleza! Você só quer ver esse modelo ou tem mais algum que queira dar uma olhada?"
 
     ---
-    ### 5. 💳 Validação de Pagamento (APENAS CELULARES)
+    ### 4. 💳 Validação de Pagamento (APENAS CELULARES)
     Após confirmar urgência, pergunte sobre a forma de pagamento:
 
     #### Para iPhone:
@@ -808,6 +857,7 @@ def get_custom_prompt(query, history_str, intent):
     - **Formas aceitas:** {forma_pagamento_iphone}
     - Se cliente sugerir outra forma:
     > "Para iPhones trabalhamos apenas com: {forma_pagamento_iphone}. Qual dessas prefere?"
+    - Para parcelamentos, considere 1x, 2x ... 21x
 
     #### Para Android:
     > "Para finalizar, você prefere pagar {forma_pagamento_android}?"
@@ -821,8 +871,8 @@ def get_custom_prompt(query, history_str, intent):
 
     ---
 
-    ### 6. ⏱️ Urgência [APENAS CELULARES]
-    Depois de entender o orçamento, pergunte:
+    ### 5. ⏱️ Urgência [APENAS CELULARES]
+    Depois:
     > "E você pretende comprar pra quando?"
 
     - Se o cliente disser algo como "hoje", "o quanto antes", "essa semana":
@@ -833,7 +883,7 @@ def get_custom_prompt(query, history_str, intent):
 
     ---
 
-    ### 7. ✅ Lead Qualificado
+    ### 6. ✅ Lead Qualificado
     > Se o LEAD estiver qualificado, construa uma mensagem de resposta baseada no exemplo abaixo, mas personalize com as informações do lead, data e hora atual comparando com o horário de atendimento da loja.
 
     Exemplo de mensagem:
@@ -853,6 +903,7 @@ def get_custom_prompt(query, history_str, intent):
     - Sempre **pergunte uma coisa por vez**.
     - Nunca mencione **preço**. Apenas valide se “pode ser atendido”.
     - Se o cliente **não souber o modelo**, ofereça uma **lista curta**.
+    - Não ofereça celulares que nao estiverem na Base de Conhecimento
 
     ---
 
@@ -868,7 +919,7 @@ def get_custom_prompt(query, history_str, intent):
 
     ## 📌 Exemplo de Conversa (Acessórios)
 
-    **Bot:** Olá, sou o(a) {nome_do_agent}, da Mr Shop! Vou te ajudar hoje. Você está buscando algo específico?
+    **Bot:** Olá, sou {nome_do_agent}, da Mr Shop! Vou te ajudar hoje. Você está buscando algo específico?
     **Cliente:** Queria um carregador pra iPhone.
 
     **Bot:** Entendi! Você pode me dizer qual tipo de acessório está buscando?
@@ -960,12 +1011,16 @@ async def messages_upsert(request: Request):
 
     logging.info(f"MSG RECEIVED: {data}")
 
-    padrao = r'\d{12}'
-    numero = re.search(padrao, full_jid)
+    sufixo = "@s.whatsapp.net"
 
-    if numero.group(0) not in AUTHORIZED_NUMBERS:
-        logging.info(f'Numero nao cadastrado na whitelist - {numero.group(0)}')
-        return JSONResponse(content={"status": "number ignored"}, status_code=200)
+    if full_jid.endswith(sufixo):
+        numero = full_jid[:-len("@s.whatsapp.net")]
+    else:
+        numero = full_jid  # Fallback se não tiver o sufixo
+
+    #if numero not in AUTHORIZED_NUMBERS:
+    #    logging.info(f'Numero nao cadastrado na whitelist - numero')
+    #    return JSONResponse(content={"status": "number ignored"}, status_code=200)
 
     if msg_type == 'imageMessage':
         send_whatsapp_message(full_jid, "Desculpe, não consigo abrir imagens. Por favor, envie a mensagem em texto.")

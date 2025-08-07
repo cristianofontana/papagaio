@@ -1,0 +1,17 @@
+pycryptodome
+fastapi
+supabase
+gotrue
+httpx
+langchain
+langchain-openai
+langchain-community
+qdrant-client
+openai
+python-dotenv
+pandas
+requests
+cryptography
+pytz
+aiohttp
+uvicorn
