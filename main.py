@@ -47,8 +47,10 @@ from cryptography.hazmat.primitives import hashes
 import tempfile
 import openai
 
+
+
 load_dotenv()
-HISTORY_EXPIRATION_MINUTES = 5
+HISTORY_EXPIRATION_MINUTES = 20
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 EVOLUTION_API_KEY = os.getenv("EVO_API_KEY")
@@ -77,6 +79,16 @@ patterns = [
     [{"LOWER": "encaminhamento"}, {"LOWER": "para"}, {"LOWER": "humanos"}]
 ]
 
+IGNORED_GROUPS = {
+    "120363420079107628@g.us": "Grupo Admin",
+    # adicione outros grupos se quiser
+}
+
+def is_group_message(remote_jid: str) -> bool:
+    return "@g.us" in remote_jid or (
+        "-" in remote_jid.split("@")[0] if "@" in remote_jid else "-" in remote_jid
+    )
+
 ################################# CONFIG PERSONALIZADA CLIENTE #################################
 def load_client_config(client_id: str) -> dict:
     try:
@@ -98,7 +110,8 @@ def load_client_config(client_id: str) -> dict:
                 'forma_pagamento_iphone': config.get('forma_pagamento_iphone', 'à vista ou parcelado'),
                 'forma_pagamento_android': config.get('forma_pagamento_android', 'à vista ou parcelado'),
                 'collection_name': config.get('collection_name', 'default_collection'),
-                'authorized_numbers': config.get('authorized_numbers', [])
+                'authorized_numbers': config.get('authorized_numbers', []),
+                'group_id': config.get('id_grupo_cliente', '')
             }
         else:
             logger.error(f"Configuração não encontrada para cliente: {client_id}")
@@ -108,7 +121,8 @@ def load_client_config(client_id: str) -> dict:
         return {}
 
 # Carregar configurações do Supabase
-CLIENT_ID = 'five_store'  # ID do cliente no Supabase
+CLIENT_ID = 'mr_shop'  # ID do cliente no Supabase
+
 def get_client_config() -> dict:
     client_config = load_client_config(CLIENT_ID)
     return client_config
@@ -116,19 +130,18 @@ def get_client_config() -> dict:
 client_config = get_client_config()
 # Usar valores padrão se a configuração não for encontrada
 nome_do_agent = client_config.get('nome_do_agent', 'Eduardo')
-nome_da_loja = client_config.get('nome_da_loja', 'Five Store')
-horario_atendimento = client_config.get('horario_atendimento', 'Seg a Sex 10:00Hrs às 18:00Hrs | Sab 9:00Hrs às 12:00Hrs | Dom Fechado')
-endereco_da_loja = client_config.get('endereco_da_loja', 'Av. Jânio da Silva Quadros, 209, Quatá - SP, 19780-035')
+nome_da_loja = client_config.get('nome_da_loja', 'Não Informado')
+horario_atendimento = client_config.get('horario_atendimento', 'Não Informado')
+endereco_da_loja = client_config.get('endereco_da_loja', 'Não Informado')
 categorias_atendidas = client_config.get('categorias_atendidas', 'Iphone e Acessórios')
 lugares_que_faz_entrega = client_config.get('lugares_que_faz_entrega', '')
 forma_pagamento_iphone = client_config.get('forma_pagamento_iphone', 'à vista e cartão em até 21X')
 forma_pagamento_android = client_config.get('forma_pagamento_android', 'à vista, no cartão em até 21X ou boleto')
-COLLECTION_NAME = client_config.get('collection_name', 'five_store')
+COLLECTION_NAME = client_config.get('collection_name', 'Não Informado')
 cliente_evo = 'papagaio'  #COLLECTION_NAME
-AUTHORIZED_NUMBERS = client_config.get('authorized_numbers', ['554196137682','553591009992','556599957004','554195780059','55111562933','554299770630'])
+AUTHORIZED_NUMBERS = client_config.get('authorized_numbers', [''])
 
-
-id_grupo_cliente = '120363420079107628@g.us' #120363420079107628@g.us
+id_grupo_cliente =  client_config.get('group_id', 'Não Informado')#'120363420079107628@g.us' #120363420079107628@g.us id grupo papagaio 
 
 #for pattern in patterns:
 #    matcher.add("TRANSFER_PATTERNS", [pattern])
@@ -354,20 +367,6 @@ def update_reminder_step(phone: str, step: int):
 
 # Função para enviar mensagens de reativação
 def send_reactivation_message():
-    client_config = get_client_config()
-    # Usar valores padrão se a configuração não for encontrada
-    nome_do_agent = client_config.get('nome_do_agent', 'Eduardo')
-    nome_da_loja = client_config.get('nome_da_loja', 'Five Store')
-    horario_atendimento = client_config.get('horario_atendimento', 'Seg a Sex 10:00Hrs às 18:00Hrs | Sab 9:00Hrs às 12:00Hrs | Dom Fechado')
-    endereco_da_loja = client_config.get('endereco_da_loja', 'Av. Jânio da Silva Quadros, 209, Quatá - SP, 19780-035')
-    categorias_atendidas = client_config.get('categorias_atendidas', 'Iphone e Acessórios')
-    lugares_que_faz_entrega = client_config.get('lugares_que_faz_entrega', '')
-    forma_pagamento_iphone = client_config.get('forma_pagamento_iphone', 'à vista e cartão em até 21X')
-    forma_pagamento_android = client_config.get('forma_pagamento_android', 'à vista, no cartão em até 21X ou boleto')
-    COLLECTION_NAME = client_config.get('collection_name', 'five_store')
-    cliente_evo = 'papagaio'  #COLLECTION_NAME
-    AUTHORIZED_NUMBERS = client_config.get('authorized_numbers', ['554196137682','553591009992','556599957004','554195780059','55111562933','554299770630'])
-
     while True:
         try:
             now = datetime.now(pytz.utc)
@@ -404,11 +403,29 @@ def save_message_to_history(phone_number: str, sender: str, message: str, conver
             "phone_number": phone_number,
             "sender": sender,
             "message": message,
-            "conversation_id": conversation_id
+            "conversation_id": conversation_id,
+            "loja": nome_da_loja,
         }
         supabase.table("chat_history").insert(data).execute()
     except Exception as e:
         logger.error(f"Erro ao salvar mensagem no histórico: {str(e)}")
+
+def is_bot_active(phone: str) -> bool:
+    """Verifica se o bot está ativo para este número na tabela profiles"""
+    try:
+        response = supabase.table("profiles") \
+            .select("is_active") \
+            .eq("phone", phone) \
+            .limit(1) \
+            .execute()
+        
+        logging.info(f"Status do bot para {phone}: {response.data}")
+        if response.data:
+            return response.data[0].get('is_active', False)
+        return False
+    except Exception as e:
+        logger.error(f"Erro ao verificar status do bot: {str(e)}")
+        return False
 
 ##################################################### FIM SUPABASE ##########################################################################################
 
@@ -506,18 +523,18 @@ def process_user_message(sender_number: str, message: str, name: str):
         budget = infos.get('BUDGET', "Valor não especificado")
         
         msg_qualificacao = f"""
-        Lead Qualificado 🔥:
-        Nome: {name},
-        Telefone: {numero},
-        Interesse: {interesse},
-        Budget: {budget},
-        Compra urgente.
-        Link: https://wa.me/{numero}
+    Lead Qualificado 🔥:
+    Nome: {name},
+    Telefone: {numero},
+    Interesse: {interesse},
+    Budget: {budget},
+    Compra urgente.
+    Link: https://wa.me/{numero}
         """
-        
+        logging.info('enviando msg para grupode qualficacao')
         send_whatsapp_message(id_grupo_cliente, msg_qualificacao)
     
-    logging.info(f'RESPONSE: {response_content}')
+    logging.info(f'Resposta para o Usuario: {response_content}')
     if response_content.strip() != "#no-answer":
         send_whatsapp_message(sender_number, response_content)
         current_stage = conversation_history[sender_number]['stage']
@@ -736,16 +753,12 @@ def get_custom_prompt(query, history_str, intent):
     client_config = get_client_config()
     # Usar valores padrão se a configuração não for encontrada
     nome_do_agent = client_config.get('nome_do_agent', 'Eduardo')
-    nome_da_loja = client_config.get('nome_da_loja', 'Five Store')
-    horario_atendimento = client_config.get('horario_atendimento', 'Seg a Sex 10:00Hrs às 18:00Hrs | Sab 9:00Hrs às 12:00Hrs | Dom Fechado')
-    endereco_da_loja = client_config.get('endereco_da_loja', 'Av. Jânio da Silva Quadros, 209, Quatá - SP, 19780-035')
+    nome_da_loja = client_config.get('nome_da_loja', 'Não Informado')
+    horario_atendimento = client_config.get('horario_atendimento', 'Não Informado')
+    endereco_da_loja = client_config.get('endereco_da_loja', 'Não Informado')
     categorias_atendidas = client_config.get('categorias_atendidas', 'Iphone e Acessórios')
-    lugares_que_faz_entrega = client_config.get('lugares_que_faz_entrega', '')
     forma_pagamento_iphone = client_config.get('forma_pagamento_iphone', 'à vista e cartão em até 21X')
     forma_pagamento_android = client_config.get('forma_pagamento_android', 'à vista, no cartão em até 21X ou boleto')
-    COLLECTION_NAME = client_config.get('collection_name', 'five_store')
-    cliente_evo = 'papagaio'  #COLLECTION_NAME
-    AUTHORIZED_NUMBERS = client_config.get('authorized_numbers', ['554196137682','553591009992','556599957004','554195780059','55111562933','554299770630'])
 
     flow = f"""
     ## 🧭 Missão
@@ -772,7 +785,7 @@ def get_custom_prompt(query, history_str, intent):
 
     ### 1. 👋 Abertura
     Inicie a conversa se apresentando:
-    > Oiii, tudo bem ? Quem ta falando é {nome_do_agent}, a IA da {nome_da_loja}! Eu estou pronta para te ajudar!!!
+    > Oiii, tudo bem ? Quem ta falando é {nome_do_agent}, a IA da {nome_da_loja}! Eu estou pronto para te ajudar!!!
 
     > Me conta ai, o que está procucando hoje, aqui trabalhamos com: {categorias_atendidas}
 
@@ -842,9 +855,6 @@ def get_custom_prompt(query, history_str, intent):
             > "No momento não estamos aceitando iPhone X/10 como entrada, mas posso te ajudar com outras formas de pagamento! Quer prosseguir?"
             > *[Aguarde resposta antes de avançar]*
 
-    - Se o cliente disser **não**:
-        > "Beleza! Você só quer ver esse modelo ou tem mais algum que queira dar uma olhada?"
-
     ---
     ### 4. 💳 Validação de Pagamento (APENAS CELULARES)
     Após confirmar urgência, pergunte sobre a forma de pagamento:
@@ -904,6 +914,8 @@ def get_custom_prompt(query, history_str, intent):
     - Nunca mencione **preço**. Apenas valide se “pode ser atendido”.
     - Se o cliente **não souber o modelo**, ofereça uma **lista curta**.
     - Não ofereça celulares que nao estiverem na Base de Conhecimento
+    - Não repita uma pergunta se já foi feita anteriormente, verifique no ### 🧠 Histórico da Conversa, antes de formular sua pergunta.
+    - Nunca aceite como entrada um modelo que não esteja na Base de Conhecimento.
 
     ---
 
@@ -914,6 +926,7 @@ def get_custom_prompt(query, history_str, intent):
     - Não invente modelos que não estão na Base de Conhecimento.
     - Não elogie aparelhos nem force entusiasmo.
     - Não retome o atendimento depois que encaminhar para o especialista.
+    - Não aceite como entrada um modelo que não esteja na Base de Conhecimento.
 
     ---
 
@@ -988,6 +1001,7 @@ def get_text_message_input(recipient, text):
     )
 
 def send_whatsapp_message(number: str, text: str):
+    #logging.info(f'resposta do bot -> {text}')
     url = f"https://saraevo-evolution-api.jntduz.easypanel.host/message/sendText/{cliente_evo}"
     payload = {
         "number": number,
@@ -998,6 +1012,7 @@ def send_whatsapp_message(number: str, text: str):
         "Content-Type": "application/json"
     }
     response = requests.post(url, json=payload, headers=headers)
+    #logging.info(f'response do bot -> {response}')
     return response
 
 
@@ -1009,8 +1024,6 @@ async def messages_upsert(request: Request):
     msg_id = data['data']['key']['id']
     from_me_flag = data['data']['key']['fromMe'] 
 
-    logging.info(f"MSG RECEIVED: {data}")
-
     sufixo = "@s.whatsapp.net"
 
     if full_jid.endswith(sufixo):
@@ -1018,12 +1031,53 @@ async def messages_upsert(request: Request):
     else:
         numero = full_jid  # Fallback se não tiver o sufixo
 
-    #if numero not in AUTHORIZED_NUMBERS:
-    #    logging.info(f'Numero nao cadastrado na whitelist - numero')
-    #    return JSONResponse(content={"status": "number ignored"}, status_code=200)
+    bot_sender = data['sender']
+    bot_number = bot_sender.split('@')[0]
 
-    if msg_type == 'imageMessage':
+    # Verificar status do bot no Supabase
+    bot_active = is_bot_active(bot_number)
+
+    if bot_active is False:
+        logging.info(f"Bot Inativado de forma manual, via aplicativo, {bot_number}: {bot_active}")
+        return JSONResponse(content={"status": "Bot Inativo"}, status_code=200)
+
+    if is_group_message(full_jid):
+        group_name = IGNORED_GROUPS.get(full_jid, "Grupo Desconhecido")
+        logger.info(f"🚫 Mensagem de grupo ignorada: {group_name}")
+        return JSONResponse(content={"status": "group_message_ignored"}, status_code=200)
+
+    valid_numbers = [num for num in AUTHORIZED_NUMBERS if num.strip()]  # Remove strings vazias
+
+    logging.info(f'NUMEROS -> {valid_numbers}')
+    logging.info(f"MSG RECEIVED: {data}")
+
+    if valid_numbers:  # Se houver números válidos na lista
+        if numero not in valid_numbers:
+            logging.info(f'Número {numero} não cadastrado na whitelist')
+            return JSONResponse(content={"status": "number ignored"}, status_code=200)
+        else:
+            logging.info(f"MSG RECEIVED de número autorizado: {data}")
+    else:
+        logging.info("Whitelist vazia - permitindo todos os números")
+        
+    
+
+    # Extrair sender_number ANTES de verificar o tipo de mensagem
+    if full_jid.endswith('@s.whatsapp.net'):
+        sender_number = full_jid.split('@')[0]
+    else:
+        sender_number = full_jid  # Fallback
+
+    with bot_state_lock:
+        bot_status = bot_active_per_chat.get(sender_number, True)
+    
+    logging.info(f'STATUS ->>>>>>> {bot_status}')
+
+    if msg_type == 'imageMessage' and bot_status:
         send_whatsapp_message(full_jid, "Desculpe, não consigo abrir imagens. Por favor, envie a mensagem em texto.")
+        return JSONResponse(content={"status": "image ignored"}, status_code=200)
+    elif msg_type == 'imageMessage' and not bot_status:
+        logging.info(f'msg ignorada, imagem detectada e bot está off')
         return JSONResponse(content={"status": "image ignored"}, status_code=200)
     elif msg_type == 'audioMessage':
         message = data['data']['message']
@@ -1055,27 +1109,28 @@ async def messages_upsert(request: Request):
     else:        
         message = data['data']['message']['conversation']   
 
-    sender_number = full_jid.split('@')[0]
-    bot_sender = data['sender']
-    bot_number = bot_sender.split('@')[0]
+    #logging.info(f"MSG RECEIVED: {data}")
+    #bot_sender = data['sender']
+    #bot_number = bot_sender.split('@')[0]
     
     name = data['data']['pushName']
 
     #logger.info(f"MSG RECEIVED FROM {sender_number}: {message}")
-    
+
     if message.strip().lower() == "#off":
         deletar_mensagem(msg_id, full_jid, from_me_flag)
         with bot_state_lock:
             bot_active_per_chat[sender_number] = False
-        send_whatsapp_message(bot_number, "🤖 Bot desativado para conversa com {sender_number}. Não responderei novas mensagens até ser reativado com #on")
+        
         return JSONResponse(content={"status": f"maintenance off for {sender_number}"}, status_code=200)
 
     elif message.strip().lower() == "#on":
         deletar_mensagem(msg_id, full_jid, from_me_flag)
         with bot_state_lock:
             bot_active_per_chat[sender_number] = True
-        send_whatsapp_message(bot_number, "🤖 Bot reativado para conversa com {sender_number}! Agora estou respondendo normalmente")
+        
         return JSONResponse(content={"status": f"maintenance on for {sender_number}"}, status_code=200)
+
         
     
     if not bot_active_per_chat[sender_number]:

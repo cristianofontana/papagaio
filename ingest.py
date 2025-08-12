@@ -7,7 +7,7 @@ from langchain_openai import OpenAIEmbeddings
 
 load_dotenv()
 
-collection_name = 'weber_store'
+collection_name = 'ibuy'
 
 def create_documents(df):
     """Transforma o CSV em documentos para embedding"""
