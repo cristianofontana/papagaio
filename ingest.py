@@ -7,7 +7,7 @@ from langchain_openai import OpenAIEmbeddings
 
 load_dotenv()
 
-collection_name = 'sky_phone'
+collection_name = 'toro_rosso'
 
 def create_documents(df):
     """Transforma o CSV em documentos para embedding"""
@@ -30,6 +30,8 @@ def create_documents(df):
 def main():
     # Carregar dados com delimitador correto
     df = pd.read_csv(f"./{collection_name}.csv", delimiter=';', encoding='utf-8-sig')
+    
+    print(df.head())
     
     # Converter preços para string
     df['preco_novo'] = df['preco_novo'].astype(str)

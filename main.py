@@ -121,7 +121,7 @@ def load_client_config(client_id: str) -> dict:
         return {}
 
 # Carregar configurações do Supabase
-CLIENT_ID = 'sky_phone'  # ID do cliente no Supabase
+CLIENT_ID = 'toro_rosso'  # ID do cliente no Supabase
 
 def get_client_config() -> dict:
     client_config = load_client_config(CLIENT_ID)
@@ -138,7 +138,7 @@ lugares_que_faz_entrega = client_config.get('lugares_que_faz_entrega', '')
 forma_pagamento_iphone = client_config.get('forma_pagamento_iphone', 'à vista e cartão em até 21X')
 forma_pagamento_android = client_config.get('forma_pagamento_android', 'à vista, no cartão em até 21X ou boleto')
 COLLECTION_NAME = client_config.get('collection_name', 'Não Informado')
-cliente_evo = 'papagaio'  #COLLECTION_NAME
+cliente_evo = 'Toro Rosso'  #COLLECTION_NAME
 AUTHORIZED_NUMBERS = client_config.get('authorized_numbers', [''])
 
 id_grupo_cliente =  client_config.get('group_id', 'Não Informado')#'120363420079107628@g.us' #120363420079107628@g.us id grupo papagaio 
@@ -788,7 +788,7 @@ def get_custom_prompt(query, history_str, intent):
     > Sempre faça o item 4. Validação de Pagamento (APENAS CELULARES)
     1. Abertura 
     2. Identificação da Necessidade 
-    3. Entrada de Aparelho (APENAS iPHONE)
+    3. Entrada de Aparelho (APENAS quando o cliente estiver comprando um iPHONE)
     4. Validação de Pagamento (APENAS CELULARES)
     5. Urgência [APENAS CELULARES]
     6. Lead Qualificado
@@ -843,7 +843,9 @@ def get_custom_prompt(query, history_str, intent):
     ---
 
     ### 2.5 🎧 Fluxo Especial para Outros
-    - Após cliente especificar o acessório (ex: "capinha para iPhone 13"):
+    - Se o cliente mencionar sobre acessórios, condutores, fones, capinhas, películas, etc.:
+    > "Entendi! Você está procurando por `TIPO DE SERVIÇO MENCIONADO PELO CLIENTE`, certo?
+    - Após cliente especificar o acessório (ex: "capinha para iPhone 13", "Conserto de iphone", "Troca de tela", "Arrumar a camera do iphone 12",etc.):
    
     - Qualquer resposta sobre o acessorio considera lead qualificado
     exemplos: 
@@ -851,16 +853,17 @@ def get_custom_prompt(query, history_str, intent):
     2. Carregador tipo C 
     ...
     - **Encaminhe imediatamente para o grupo de leads quentes**:
-    > "Perfeito! Já adicionei você na nossa lista prioritária. Um especialista em acessórios vai entrar em contato ainda hoje, ok? Lembrando que atendemos das {horario_atendimento}!"
+    > "Perfeito! Já adicionei você na nossa lista prioritária. Um especialista em acessórios vai entrar em contato ainda hoje, ok? Lembrando que atendemos de {horario_atendimento}!"
 
     - **FIM DO FLUXO PARA ACESSÓRIOS**
 
     ---
 
-    ### 3. 🔁 Entrada de Aparelho (APENAS iPHONE)
+    ### 3. 🔁 Entrada de Aparelho (APENAS quando o cliente estiver comprando um iPHONE)
     Se o cliente estiver interessado em um iPhone:
     > "Você pretende usar o seu iPhone atual como parte do pagamento?"
     *** Faça essa pergunta APENAS se o cliente estiver interessado em um iPhone
+    *** Não faça esta pergunta se o cliente estiver interessado em um Android ou outro produto 
 
     - Se o cliente disser **sim**:
         - Pergunte:
@@ -976,7 +979,7 @@ def get_custom_prompt(query, history_str, intent):
     **Bot:** Anotado! Você precisa desse acessório para quando?
     **Cliente:** Se possível até amanhã.
 
-    **Bot:** Perfeito! Já adicionei você na nossa lista prioritária. Um especialista em acessórios vai entrar em contato ainda hoje, ok? Lembrando que atendemos das 9h às 18h de Segunda a Sabado!
+    **Bot:** Perfeito! Já adicionei você na nossa lista prioritária. Um especialista em acessórios vai entrar em contato ainda hoje, ok? Lembrando que atendemos de 9h às 18h de Segunda a Sabado!
     """
 
     qdrant_results = query_qdrant(query)
