@@ -121,7 +121,7 @@ def load_client_config(client_id: str) -> dict:
         return {}
 
 # Carregar configurações do Supabase
-CLIENT_ID = 'mr_shop'  # ID do cliente no Supabase
+CLIENT_ID = 'sky_phone'  # ID do cliente no Supabase
 
 def get_client_config() -> dict:
     client_config = load_client_config(CLIENT_ID)
@@ -448,8 +448,8 @@ def cleanup_expired_histories():
         # Verifica a cada minuto
         time.sleep(60)
 
-# Variável global para o buffer
-message_buffer = MessageBuffer(timeout=3)
+# Variável global para o buffer MEGABUFFER
+message_buffer = MessageBuffer(timeout=10)
 
 def process_user_message(sender_number: str, message: str, name: str):
 
@@ -521,6 +521,7 @@ def process_user_message(sender_number: str, message: str, name: str):
 
         interesse = infos.get('INTERESSE', "Produto não especificado")
         budget = infos.get('BUDGET', "Valor não especificado")
+        urgency = infos.get('URGENCIA', "Não especificado")
         
         msg_qualificacao = f"""
     Lead Qualificado 🔥:
@@ -528,7 +529,7 @@ def process_user_message(sender_number: str, message: str, name: str):
     Telefone: {numero},
     Interesse: {interesse},
     Budget: {budget},
-    Compra urgente.
+    Urgencia: {urgency}
     Link: https://wa.me/{numero}
         """
         logging.info('enviando msg para grupode qualficacao')
@@ -731,7 +732,11 @@ def get_info(history: list) -> str:
     6. Se não encontrar interesse claro, retorne: "Produto não especificado".
 
     ### BUDGET
-    2. Se não houver menção de valor, retorne: "Valor não especificado".
+    1. Se não houver menção de valor, retorne: "Valor não especificado".
+
+    ### URGENCIA
+    1. Idenfique a urgencia do cliente, exemplo: hoje, amanha, semana que vem, mes que vem
+    2. Se não houver menção de valor, retorne: "Não especificado".
 
     ## IMPORTANTE
     - A resposta deve conter apenas o JSON.
@@ -764,6 +769,20 @@ def get_custom_prompt(query, history_str, intent):
     ## 🧭 Missão
     Você é  {nome_do_agent}, agente virtual da loja de celulares {nome_da_loja}. Sua função é **qualificar leads automaticamente usando o método abaixo** e, se estiverem qualificados, encaminhá-los para um especialista humano finalizar a venda.
     
+    ### 🔤 Equivalências de Termos
+    - **Novo**: "lacrado", "selado", "fechado", "nunca usado", "zero" → todos significam **novo**
+    - **Seminovo**: "usado", "recondicionado", "recond", "semi-novo" → todos significam **seminovo**
+    - Sempre substitua mentalmente esses termos ao interpretar a pergunta do cliente
+
+    ### 📱 Regras Cruciais para Listagem
+    1. **NUNCA mostre preços** em listagens
+    2. **NUNCA mencione valores**, mesmo se solicitado
+    3. Para listas de produtos:
+        - **iPhone**: Mostre modelos do mais novo ao mais antigo, e sempre fale que tem modelos - Entre novos e seminovos
+        - **Android**: Liste apenas modelos novos
+        - Máximo de 7 itens por lista
+        - Formate EXATAMENTE como abaixo:
+
     ### Etapas de qualificação
     > Para Celulares 
     > Sempre faça o item 4. Validação de Pagamento (APENAS CELULARES)
@@ -802,13 +821,24 @@ def get_custom_prompt(query, history_str, intent):
     - **NUNCA mencione valores mesmo que o cliente peça explicitamente**
     - Use a Base de Conhecimento para listar os Produtos disponíveis
 
+
     - Caso o cliente não saiba exatamento o que quer ou pergunte o que tem:
-    - Acesse a **Base de conhecimento** e liste até 5 opções com nome e armazenamento, exemplo:
-    > "Olha, temos disponível:"
-    > - iPhone 11 
-    > - iPhone 13 
+    - Acesse a **Base de conhecimento** e liste até 7 opções com nome e ordene do mais novo para o mais antigo, 
+    exemplos:
+    > "Olha, temos disponível - entre Novos e Seminovos:"
+    > - iPhone 16 Pro Max
+    > - iPhone 16 
+    > - iPhone 15  
     ...
     > - iPhone 12 
+    
+    > "Olha, temos disponível:"
+    > - Android 1
+    > - Android 2 
+    > - Android 3 
+    ...
+    > - Android N
+    
 
     ---
 
@@ -912,7 +942,12 @@ def get_custom_prompt(query, history_str, intent):
     - Para celulares:
     - Sempre **pergunte uma coisa por vez**.
     - Nunca mencione **preço**. Apenas valide se “pode ser atendido”.
-    - Se o cliente **não souber o modelo**, ofereça uma **lista curta**.
+    - Se o cliente **não souber o modelo**, ofereça uma **lista curta**, e ordene do mais novo para o mais antigo.
+        > "Olha, temos disponível - entre Novos e Seminovos:"
+        > - iPhone 16 
+        > - iPhone 15 
+        ...
+        > - iPhone 12 
     - Não ofereça celulares que nao estiverem na Base de Conhecimento
     - Não repita uma pergunta se já foi feita anteriormente, verifique no ### 🧠 Histórico da Conversa, antes de formular sua pergunta.
     - Nunca aceite como entrada um modelo que não esteja na Base de Conhecimento.
@@ -1136,7 +1171,7 @@ async def messages_upsert(request: Request):
     if not bot_active_per_chat[sender_number]:
         logging.info(f"Ignorando mensagem de {sender_number} - Bot inativo para este número")
     else:
-        message_buffer.add_message(full_jid, message, name)
+        message_buffer.add_message(numero, message, name)
 
         try:
             supabase.table("conversation_states").delete().eq("phone", sender_number).execute()

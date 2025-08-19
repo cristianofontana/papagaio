@@ -8,7 +8,7 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-cliente_evo = 'iBuy'
+cliente_evo = 'Iclub_Castanhal'
 
 EVOLUTION_API_KEY = os.getenv("EVO_API_KEY")
 EVOLUTION_SERVER_URL = 'https://saraevo-evolution-api.jntduz.easypanel.host/message/sendText/{cliente_evo}'
