@@ -126,8 +126,7 @@ def load_client_config(client_id: str) -> dict:
         return {}
 
 # Carregar configurações do Supabase
-CLIENT_ID = 'villa_imports'  # ID do cliente no Supabase
-verificar_lead_qualificado = False  # Ativar verificação de lead qualificado
+CLIENT_ID = 'five_store'  # ID do cliente no Supabase
 
 def get_client_config() -> dict:
     client_config = load_client_config(CLIENT_ID)
@@ -144,7 +143,7 @@ lugares_que_faz_entrega = client_config.get('lugares_que_faz_entrega', '')
 forma_pagamento_iphone = client_config.get('forma_pagamento_iphone', 'à vista e cartão em até 21X')
 forma_pagamento_android = client_config.get('forma_pagamento_android', 'à vista, no cartão em até 21X ou boleto')
 COLLECTION_NAME = client_config.get('collection_name', 'Não Informado')
-cliente_evo = 'Papagaio_dev'  #COLLECTION_NAME
+cliente_evo = 'Five Store'  #COLLECTION_NAME
 AUTHORIZED_NUMBERS = client_config.get('authorized_numbers', [''])
 
 id_grupo_cliente =  client_config.get('group_id', 'Não Informado')#'120363420079107628@g.us' #120363420079107628@g.us id grupo papagaio 
@@ -391,44 +390,6 @@ async def send_message_webhook(request: Request):
         return JSONResponse(content={"status": "Mensagem enviada", "numero": numero}, status_code=200)
     else:
         return JSONResponse(content={"error": "Falha ao enviar mensagem", "detalhe": resp.text}, status_code=500)
-
-#### Leads qualificados 
-
-def upsert_qualified_lead(phone: str, client_id: str):
-    """Insere ou atualiza um lead qualificado na tabela"""
-    try:
-        now = datetime.now(pytz.utc)
-        active_until = now + timedelta(days=10)
-        
-        data = {
-            "phone": phone,
-            "client": client_id,
-            "qualified_at": now.isoformat(),
-            "active_until": active_until.isoformat()
-        }
-        
-        supabase.table("qualified_leads").upsert(data).execute()
-        logger.info(f"Lead {phone} marcado como qualificado por 10 dias")
-    except Exception as e:
-        logger.error(f"Erro ao upsert qualified lead: {str(e)}")
-
-def is_lead_qualified_recently(phone: str) -> bool:
-    """Verifica se o lead foi qualificado nos últimos 10 dias"""
-    try:
-        response = supabase.table("qualified_leads") \
-            .select("active_until") \
-            .eq("phone", phone) \
-            .limit(1) \
-            .execute()
-            
-        if response.data:
-            active_until_str = response.data[0]['active_until']
-            active_until = datetime.fromisoformat(active_until_str.replace('Z', '+00:00'))
-            return datetime.now(pytz.utc) < active_until
-        return False
-    except Exception as e:
-        logger.error(f"Erro ao verificar lead qualificado: {str(e)}")
-        return False
 
 #### Inserção dados CRM 
 def inserir_dados_crm(payload):
@@ -804,7 +765,6 @@ def process_user_message(sender_number: str, message: str, name: str):
         logging.info('enviando msg para grupode qualficacao')
         response = send_whatsapp_message(id_grupo_cliente, msg_qualificacao)
         logging.info(f'Mensagem enviada para o grupo de qualificação: {response.status_code} - {response.text}')
-        upsert_qualified_lead(sender_number, CLIENT_ID)
         
         atualizar_status_lead(numero, "hot")
         logging.info(f"Lead {numero} atualizado para status 'hot' no CRM.")
@@ -1079,20 +1039,14 @@ def get_custom_prompt(query, history_str, intent ,nome_cliente):
             categorias_atendidas=categorias_atendidas
         )
         
-    logging.info(f"msg de FECHAMENTO TEMPLATE -> {msg_fechamento_template}")
-        
     if msg_fechamento_template:
         msg_fechamento = msg_fechamento_template.format(
             horario_atendimento=horario_atendimento
         )
-    logging.info(f"msg de FECHAMENTO -> {msg_fechamento}")
 
     flow = f"""
     ## 🧭 Missão
-    ## 🧭 Missão
     Você é  {nome_do_agent}, agente virtual da loja de celulares {nome_da_loja}. Sua função é **qualificar leads automaticamente usando o método abaixo** e, se estiverem qualificados, encaminhá-los para um especialista humano finalizar a venda.
-    
-    ### Você está falando com: {nome_cliente}
     
     ### 🔤 Equivalências de Termos
     - **Novo**: "lacrado", "selado", "fechado", "nunca usado", "zero" → todos significam **novo**
@@ -1103,17 +1057,28 @@ def get_custom_prompt(query, history_str, intent ,nome_cliente):
     1. **NUNCA mostre preços** em listagens
     2. **NUNCA mencione valores**, mesmo se solicitado
     3. Para listas de produtos:
-        - Para iPhone:
-        > "Entendi! Trabalhamos com uma variedade de iPhones, entre {lista_iphone}. Qual modelo você tem em mente?"
-        - Para Android:
-        > "Entendi! Trabalhamos com uma variedade de {lista_android}, etc. Qual modelo você tem em mente?"
-        3.1 Se o cliente responder não sei para a pergunta acima, siga o fluxo normal de qualificação
+        - **iPhone**: Mostre modelos do mais novo ao mais antigo, e sempre fale que tem modelos - Entre novos e seminovos
+        - **Android**: Liste apenas modelos novos
+        - Máximo de 7 itens por lista
+        - Formate EXATAMENTE como abaixo:
 
     ### Etapas de qualificação
     > Para Celulares 
-    1. Identificar o interesse do cliente, sempre será algo entre: {categorias_atendidas}
-    2. Deixar claro para o cliente as formas de pagamento disponíveis: {forma_pagamento_iphone}
-    3. Se o CLiente perguntar o preço, e você já souber a intensão do cliente, QUALIFIQUE o lead, e encaminhe para o grupo de leads quentes
+    > Sempre faça o item 4. Validação de Pagamento (APENAS CELULARES)
+    1. Abertura 
+    2. Identificação da Necessidade 
+    3. Entrada de Aparelho (APENAS quando o cliente estiver comprando um iPHONE)
+    4. Validação de Pagamento (APENAS CELULARES)
+    5. Urgência [APENAS CELULARES]
+    6. Lead Qualificado
+    
+    ---
+    ## SOLICITAÇÃO DE PREÇO ou VALOR
+    1. Responda que não pode informar valores, e que precisa melhor a necessidade do cliente
+    2. Se o cliente insistir, responda:
+    > "Olha, eu adoraria te ajudar com isso, vou te passar para um especialista que vai cuidar de você com uma condição especial, beleza? Lembrando que nosso horário de atendimento é {horario_atendimento}."
+    
+    ---
 
     > Outros
     2.5 Fluxo Especial para Outros
@@ -1129,39 +1094,42 @@ def get_custom_prompt(query, history_str, intent ,nome_cliente):
     {msg_abertura}
 
     ---
-    
-    ## Fluxo para perguntas sobre valor ou preço de produtos
-    - Sempre que o cliente perguntar sobre o preço de um produto (ex.: celular, tablet, fone de ouvido), responda **exatamente** no seguinte formato:  
-    1. Comece com: "Entendi! Logo irei te passar os valores do [produto mencionado pelo cliente]".  
-    2. Em seguida, improvise uma frase curta e natural, como:  
-    - "podemos falar sobre isso mais tarde, ou;"
-    - "mas antes preciso entender melhor o que você precisa, beleza?"
-        
-    ---
-    
+
     ### 2. 🧠 Identificação da Necessidade/Interesse
     - Se você souber o interesse do cliente (ex: iPhone 13, Samsung S21, conserto de tela, capinha para iPhone, etc.), vá para a próxima etapa (Etapa 3).
     - **Se o cliente mencionar acessórios** (capinha, carregador, fone, película, etc.):
-    - Tente identificar o tipo de acessório, se tiver duvida pergunte novamente
-    - E **Pule direto para a Etapa 2.5**
+    > "Entendi! Você pode me dizer qual tipo de acessório está buscando?"
+    - Aguarde a especificação do acessório
+    - **Pule direto para a Etapa 2.5**
 
     - Para celulares (iPhone/Android):
     - **NUNCA mostre preços na listagem**
     - **NUNCA mencione valores mesmo que o cliente peça explicitamente**
+    - Use a Base de Conhecimento para listar os Produtos disponíveis
 
-    - Verifique no histórico se o cliente já especificou modelos anteriormente
-    - Se JÁ tiver mencionado modelos específicos, pule para a próxima etapa (forma de pagamento)
+
     - Caso o cliente não saiba exatamento o que quer ou pergunte o que tem:
-        - Para iPhone:
-        > "Entendi! Trabalhamos com uma variedade de iPhones, entre {lista_iphone}. Qual modelo você tem em mente?"
-        - Para Android:
-        > "Entendi! Trabalhamos com uma variedade de {lista_android}, etc. Qual modelo você tem em mente?"
-        3.1 Se o cliente responder não sei para a pergunta acima, responda que precisa de mais informações para ajudar, e siga o fluxo normal de qualificação
+    - Acesse a **Base de conhecimento** e liste até 7 opções com nome e ordene do mais novo para o mais antigo, 
+    exemplos:
+    > "Olha, temos disponível - entre Novos e Seminovos:"
+    > - iPhone 16 Pro Max
+    > - iPhone 16 
+    > - iPhone 15  
+    ...
+    > - iPhone 12 
     
+    > "Olha, temos disponível:"
+    > - Android 1
+    > - Android 2 
+    > - Android 3 
+    ...
+    > - Android N
+    
+
     ---
 
     ### 2.5 🎧 Fluxo Especial para Outros
-    - Se o cliente mencionar sobre acessórios, carregadores, fones, capinhas, películas, etc.:
+    - Se o cliente mencionar sobre acessórios, condutores, fones, capinhas, películas, etc.:
     > "Entendi! Você está procurando por `TIPO DE SERVIÇO MENCIONADO PELO CLIENTE`, certo?
     - Após cliente especificar o acessório (ex: "capinha para iPhone 13", "Conserto de iphone", "Troca de tela", "Arrumar a camera do iphone 12",etc.):
    
@@ -1171,30 +1139,68 @@ def get_custom_prompt(query, history_str, intent ,nome_cliente):
     2. Carregador tipo C 
     ...
     - **Encaminhe imediatamente para o grupo de leads quentes**:
-    {msg_fechamento}
+    > {msg_fechamento}
 
     - **FIM DO FLUXO PARA ACESSÓRIOS**
 
     ---
 
     ### 3. 🔁 Entrada de Aparelho (APENAS quando o cliente estiver comprando um iPHONE)
-    - Se o cliente perguntar sobre entrada ou troca de aparelho:
-    > "Para iPhones, trabalhamos com entrada ou troca de aparelho. Você tem algum modelo para oferecer como entrada?"
-    - Siga o fluxo de qualificação normal, mas **NUNCA mencione valores**.
+    Se o cliente estiver interessado em um iPhone:
+    > "Você pretende usar o seu iPhone atual como parte do pagamento?"
+    *** Faça essa pergunta APENAS se o cliente estiver interessado em um iPhone
+    *** Não faça esta pergunta se o cliente estiver interessado em um Android ou outro produto 
 
+    - Se o cliente disser **sim**:
+        - Pergunte:
+        > "Qual o modelo exato do seu aparelho? (Ex: iPhone 11 Pro Max, iPhone SE 2020)"
+        
+        - **Validação rigorosa**:
+            1. Consulte a **Base de Conhecimento** procurando pelo **modelo exato** informado
+            2. Se não encontrar:
+                - Verifique equivalências conhecidas:
+                    - "iPhone X" → "iPhone 10" (e vice-versa)
+                    - "iPhone 11 Pro" ≠ "iPhone 11" (modelos diferentes)
+            3. Critérios de aceite:
+                - ✅ APENAS se encontrar registro COM `aceita_como_entrada = "SIM"`
+                - ❌ Caso contrário: rejeite
+
+        - Responda **baseada estritamente nos resultados**:
+            - Se encontrou modelo equivalente válido:
+            > "Perfeito! Esse modelo é aceito como entrada sim."
+            > "Você saberia me dizer como está a saúde da bateria? E se o aparelho já foi aberto, tem riscos ou trincados?"
+            
+            - Se **não encontrou** ou modelo inválido:
+            > "No momento não estamos aceitando iPhone X/10 como entrada, mas posso te ajudar com outras formas de pagamento! Quer prosseguir?"
+            > *[Aguarde resposta antes de avançar]*
+
+    ---
+    ### 4. 💳 Validação de Pagamento (APENAS CELULARES)
+    Após confirmar urgência, pergunte sobre a forma de pagamento:
 
     #### Para iPhone:
     > "Você prefere pagar à vista ou no cartão?"
-    - se o cliente perguntar sobre boleto, fale: "Trabalhamos com {forma_pagamento_iphone}. Qual dessas prefere?"
+    - se o cliente perguntar sobre boleto, fale: "Para iPhones trabalhamos apenas com {forma_pagamento_iphone}. Qual dessas prefere?"
+
 
     - **Formas aceitas:** {forma_pagamento_iphone}
+    - Se cliente sugerir outra forma:
+    > "Para iPhones trabalhamos apenas com: {forma_pagamento_iphone}. Qual dessas prefere?"
+    - Para parcelamentos, considere 1x, 2x ... 21x
+
+    #### Para Android:
+    > "Para finalizar, você prefere pagar {forma_pagamento_android}?"
+
+    - **Formas aceitas:** {forma_pagamento_android}
+    - Se cliente sugerir outra forma:
+    > "Para Androids aceitamos {forma_pagamento_android}. Qual dessas formas se encaixa melhor?"
 
     #### Para outros produtos:
     - Não perguntar sobre forma de pagamento
 
     ---
 
-    ### 4. ⏱️ Urgência [APENAS CELULARES]
+    ### 5. ⏱️ Urgência [APENAS CELULARES]
     Depois:
     > "E você pretende comprar pra quando?"
 
@@ -1221,19 +1227,19 @@ def get_custom_prompt(query, history_str, intent ,nome_cliente):
     - Pergunte apenas sobre urgência
     - Encaminhe imediatamente após confirmar urgência
     - Não pergunte sobre orçamento ou entrada
-    - Sempre que puder fale com o cleinte pelo nome dele: {nome_cliente}
 
     - Para celulares:
     - Sempre **pergunte uma coisa por vez**.
     - Nunca mencione **preço**. Apenas valide se “pode ser atendido”.
-    - Se o cliente **não souber o modelo**
-        - Para iPhone:
-        > "Entendi! Trabalhamos com uma variedade de iPhones, entre {lista_iphone}. Qual modelo você tem em mente?"
-        - Para Android:
-        > "Entendi! Trabalhamos com uma variedade de {lista_android}, etc. Qual modelo você tem em mente?"
-        3.1 Se o cliente responder não sei para a pergunta acima, responda que precisa de mais informações para ajudar, e siga o fluxo normal de qualificação
-    - Não ofereça celulares
+    - Se o cliente **não souber o modelo**, ofereça uma **lista curta**, e ordene do mais novo para o mais antigo.
+        > "Olha, temos disponível - entre Novos e Seminovos:"
+        > - iPhone 16 
+        > - iPhone 15 
+        ...
+        > - iPhone 12 
+    - Não ofereça celulares que nao estiverem na Base de Conhecimento
     - Não repita uma pergunta se já foi feita anteriormente, verifique no ### 🧠 Histórico da Conversa, antes de formular sua pergunta.
+    - Nunca aceite como entrada um modelo que não esteja na Base de Conhecimento.
 
     ---
 
@@ -1244,13 +1250,13 @@ def get_custom_prompt(query, history_str, intent ,nome_cliente):
     - Não invente modelos que não estão na Base de Conhecimento.
     - Não elogie aparelhos nem force entusiasmo.
     - Não retome o atendimento depois que encaminhar para o especialista.
-    - Não fale que aceita ou nao aceita o aparelho do cliente como entrada, apenas resposta de forma cordial, e fale que um especialsita irá avalidar o aparelhor posteriormente. 
+    - Não aceite como entrada um modelo que não esteja na Base de Conhecimento.
 
     ---
-    ## Exemplos de Conversa
-    
-    ### 📌Acessórios
-    **Bot:** Olá, sou {nome_do_agent}, da {nome_da_loja}! Vou te ajudar hoje. Você está buscando algo específico?
+
+    ## 📌 Exemplo de Conversa (Acessórios)
+
+    **Bot:** Olá, sou {nome_do_agent}, da Mr Shop! Vou te ajudar hoje. Você está buscando algo específico?
     **Cliente:** Queria um carregador pra iPhone.
 
     **Bot:** Entendi! Você pode me dizer qual tipo de acessório está buscando?
@@ -1261,26 +1267,7 @@ def get_custom_prompt(query, history_str, intent ,nome_cliente):
 
     **Bot:** {msg_fechamento}
     
-    ### 📌Celulares Exemplo1 
-    
-    **Bot:** {msg_abertura}
-    **Cliente:** Quero comprar um celular.
-    
-    **Bot:** Entendi! Trabalhamos com uma variedade de iPhones, entre {lista_iphone}. Qual modelo você tem em mente?
-    **Cliente:** Não sei, o que você tem?
-    
-    **Bot:** Para iPhones, trabalhamos com entrada ou troca de aparelho. Você tem algum modelo para oferecer como entrada?
-    **Cliente:** Tenho um iPhone X.
-    
-    **Bot:** Legal! Você prefere pagar à vista ou no cartão?
-    **Cliente:** No cartão.
-    
-    **Bot:** Perfeito! E você pretende comprar pra quando?
-    **Cliente:** Essa semana.
-    
-    **Bot:** {msg_fechamento}
-    
-    ### 📌Celulares Exemplo 2
+    ### 📌Celulares Exemplo
     
     **Bot:** {msg_abertura}
     **Cliente:** Quero um Iphone 13.
@@ -1290,7 +1277,6 @@ def get_custom_prompt(query, history_str, intent ,nome_cliente):
     
     **Bot:** Entendi! Logo irei te passar os valores do iPhone 13, mas antes preciso entender melhor o que você precisa, beleza?
     **Cliente:** No cartão.
-    
     """
 
     qdrant_results = query_qdrant(query)
@@ -1423,11 +1409,6 @@ async def messages_upsert(request: Request):
         sender_number = full_jid.split('@')[0]
     else:
         sender_number = full_jid
-    
-    #valida se o lead foi qualificado recentemente
-    if is_lead_qualified_recently(full_jid) and verificar_lead_qualificado is True:
-        logger.info(f"Ignorando mensagem de lead qualificado recentemente: {sender_number}")
-        return JSONResponse(content={"status": "qualified_lead_ignored"}, status_code=200)
 
     with bot_state_lock:
         bot_status = bot_active_per_chat.get(sender_number, True)
