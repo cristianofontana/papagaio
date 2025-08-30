@@ -126,7 +126,7 @@ def load_client_config(client_id: str) -> dict:
         return {}
 
 # Carregar configurações do Supabase
-CLIENT_ID = 'villa_imports'  # ID do cliente no Supabase
+CLIENT_ID = 'gamma_store'  # ID do cliente no Supabase
 verificar_lead_qualificado = False  # Ativar verificação de lead qualificado
 
 def get_client_config() -> dict:
@@ -144,7 +144,7 @@ lugares_que_faz_entrega = client_config.get('lugares_que_faz_entrega', '')
 forma_pagamento_iphone = client_config.get('forma_pagamento_iphone', 'à vista e cartão em até 21X')
 forma_pagamento_android = client_config.get('forma_pagamento_android', 'à vista, no cartão em até 21X ou boleto')
 COLLECTION_NAME = client_config.get('collection_name', 'Não Informado')
-cliente_evo = 'Papagaio_dev'  #COLLECTION_NAME
+cliente_evo = 'Gamma Store'  #COLLECTION_NAME
 AUTHORIZED_NUMBERS = client_config.get('authorized_numbers', [''])
 
 id_grupo_cliente =  client_config.get('group_id', 'Não Informado')#'120363420079107628@g.us' #120363420079107628@g.us id grupo papagaio 
@@ -288,10 +288,11 @@ def no_horario_inatividade():
         dia_semana = agora.weekday()  # 0=segunda, 6=domingo
         
         # Verificar se é dia útil (segunda a sexta)
+        ##if dia_semana < 5:  # 0-4 = segunda a sexta
+        # Verificar se está entre 8:00 e 18:00
         if dia_semana < 5:  # 0-4 = segunda a sexta
-            # Verificar se está entre 8:00 e 18:00
-            inicio = datetime.strptime('10:00', '%H:%M').time()
-            fim = datetime.strptime('19:00', '%H:%M').time()
+            inicio = datetime.strptime('08:00', '%H:%M').time()
+            fim = datetime.strptime('18:00', '%H:%M').time()
             
             if inicio <= hora_atual <= fim:
                 return True
@@ -1089,7 +1090,6 @@ def get_custom_prompt(query, history_str, intent ,nome_cliente):
 
     flow = f"""
     ## 🧭 Missão
-    ## 🧭 Missão
     Você é  {nome_do_agent}, agente virtual da loja de celulares {nome_da_loja}. Sua função é **qualificar leads automaticamente usando o método abaixo** e, se estiverem qualificados, encaminhá-los para um especialista humano finalizar a venda.
     
     ### Você está falando com: {nome_cliente}
@@ -1129,6 +1129,13 @@ def get_custom_prompt(query, history_str, intent ,nome_cliente):
     {msg_abertura}
 
     ---
+    
+    ### ❗ Regra de Insistência em Preços
+    - Se o cliente perguntar sobre preços mais de DUAS VEZES na mesma conversa:
+    - Imediatamente responda com: 
+    "Olha, eu adoraria te ajudar com isso, vou te passar para um especialista que vai cuidar de você com uma condição especial, beleza? Lembrando que nosso horário de atendimento é {horario_atendimento}."
+    - NÃO continue com o fluxo normal de qualificação
+    - Esta regra tem PRIORIDADE sobre todas as outras
     
     ## Fluxo para perguntas sobre valor ou preço de produtos
     - Sempre que o cliente perguntar sobre o preço de um produto (ex.: celular, tablet, fone de ouvido), responda **exatamente** no seguinte formato:  
@@ -1436,9 +1443,9 @@ async def messages_upsert(request: Request):
 
     # Extrair a mensagem do usuário
     if msg_type == 'audioMessage':
-        #if no_horario_inatividade():
-        #    logger.info("Áudio recebido no horário de inatividade")
-        #    return JSONResponse(content={"status": "inactive_time"}, status_code=200)
+        if no_horario_inatividade():
+            logger.info("Áudio recebido no horário de inatividade")
+            return JSONResponse(content={"status": "inactive_time"}, status_code=200)
         
         # Processamento de áudio (mantido igual)
         message_data = data['data']['message']
@@ -1487,12 +1494,16 @@ async def messages_upsert(request: Request):
             bot_active_per_chat[full_jid] = True
         
         return JSONResponse(content={"status": f"maintenance on for {sender_number}"}, status_code=200)
+    
+    if from_me_flag:
+        logging.info("Mensagem enviada pelo bot, ignorando...")
+        return JSONResponse(content={"status": "message from me ignored"}, status_code=200)
 
     #Verificar se estamos no horário de inatividade
-    #if no_horario_inatividade():
-    #    logger.info(f"Mensagem recebida no horário de inatividade: {message}")
-    #    # Não processar a mensagem, apenas registrar no log
-    #    return JSONResponse(content={"status": "inactive_time"}, status_code=200)
+    if no_horario_inatividade():
+        logger.info(f"Mensagem recebida no horário de inatividade: {message}")
+        # Não processar a mensagem, apenas registrar no log
+        return JSONResponse(content={"status": "inactive_time"}, status_code=200)
 
     # Se chegou aqui, está fora do horário de inatividade, processar normalmente
     if msg_type == 'imageMessage' and bot_status:
