@@ -126,7 +126,8 @@ def load_client_config(client_id: str) -> dict:
         return {}
 
 # Carregar configurações do Supabase
-CLIENT_ID = 'five_store'  # ID do cliente no Supabase
+CLIENT_ID = 'mr_shop'  # ID do cliente no Supabase
+verificar_lead_qualificado = True  # Ativar verificação de lead qualificado
 
 def get_client_config() -> dict:
     client_config = load_client_config(CLIENT_ID)
@@ -143,7 +144,7 @@ lugares_que_faz_entrega = client_config.get('lugares_que_faz_entrega', '')
 forma_pagamento_iphone = client_config.get('forma_pagamento_iphone', 'à vista e cartão em até 21X')
 forma_pagamento_android = client_config.get('forma_pagamento_android', 'à vista, no cartão em até 21X ou boleto')
 COLLECTION_NAME = client_config.get('collection_name', 'Não Informado')
-cliente_evo = 'Five Store'  #COLLECTION_NAME
+cliente_evo = 'Mr Shop'  #COLLECTION_NAME
 AUTHORIZED_NUMBERS = client_config.get('authorized_numbers', [''])
 
 id_grupo_cliente =  client_config.get('group_id', 'Não Informado')#'120363420079107628@g.us' #120363420079107628@g.us id grupo papagaio 
@@ -197,6 +198,14 @@ class MessageBuffer:
         
         # Chama a função de processamento principal
         process_user_message(user_id, concatenated_message, name)
+        
+    # Novo método para limpar o buffer de um usuário
+    def clear_buffer(self, user_id: str):
+        with self.lock:
+            if user_id in self.buffers:
+                if self.buffers[user_id]['timer']:
+                    self.buffers[user_id]['timer'].cancel()
+                del self.buffers[user_id]
 
 ########################################################################## INICIO RAG SYSTEM #####################################################################################
 from qdrant_client import QdrantClient
@@ -287,13 +296,14 @@ def no_horario_inatividade():
         dia_semana = agora.weekday()  # 0=segunda, 6=domingo
         
         # Verificar se é dia útil (segunda a sexta)
-        if dia_semana < 5:  # 0-4 = segunda a sexta
-            # Verificar se está entre 8:00 e 18:00
-            inicio = datetime.strptime('10:00', '%H:%M').time()
-            fim = datetime.strptime('19:00', '%H:%M').time()
-            
-            if inicio <= hora_atual <= fim:
-                return True
+        ##if dia_semana < 5:  # 0-4 = segunda a sexta
+        # Verificar se está entre 8:00 e 18:00
+        #if dia_semana < 5:  # 0-4 = segunda a sexta
+        inicio = datetime.strptime('08:30', '%H:%M').time()
+        fim = datetime.strptime('16:00', '%H:%M').time()
+        
+        if inicio <= hora_atual <= fim:
+            return True
                 
         return False
         
@@ -366,6 +376,7 @@ async def send_message_webhook(request: Request):
         #json_responde_bot = make_json_response_bot(chatName=name, chatLid=full_jid, fromMe=True, instanceId='', messageId='', status='SENT', senderName='CRM', messageType='text', messageContent='#off', phone=numero)
         #inserir_dados_crm(json_responde_bot)
         
+        message_buffer.clear_buffer(full_jid)  # Limpa o buffer para este usuário
         return JSONResponse(content={"status": f"maintenance OFF for {numero}"}, status_code=200)
 
     elif mensagem.strip().lower() == "#on":
@@ -390,6 +401,75 @@ async def send_message_webhook(request: Request):
         return JSONResponse(content={"status": "Mensagem enviada", "numero": numero}, status_code=200)
     else:
         return JSONResponse(content={"error": "Falha ao enviar mensagem", "detalhe": resp.text}, status_code=500)
+
+#### Trecho para obter e salvar o nome do cliente 
+
+def get_client_name_from_db(phone: str) -> Optional[str]:
+    """Busca o nome do cliente no banco de dados pelo número de telefone."""
+    try:
+        response = supabase.table("client_profiles") \
+            .select("name") \
+            .eq("phone", phone) \
+            .limit(1) \
+            .execute()
+        if response.data:
+            return response.data[0].get('name')
+        return None
+    except Exception as e:
+        logger.error(f"Erro ao buscar nome do cliente: {str(e)}")
+        return None
+
+def save_client_name_to_db(phone: str, name: str):
+    """Salva ou atualiza o nome do cliente no banco de dados."""
+    try:
+        data = {
+            "phone": phone,
+            "name": name,
+            "updated_at": datetime.now(pytz.utc).isoformat()
+        }
+        supabase.table("client_profiles").upsert(data).execute()
+        logger.info(f"Nome do cliente {phone} salvo como {name}")
+    except Exception as e:
+        logger.error(f"Erro ao salvar nome do cliente: {str(e)}")
+
+#### Leads qualificados 
+
+def upsert_qualified_lead(phone: str, client_id: str):
+    """Insere ou atualiza um lead qualificado na tabela"""
+    try:
+        now = datetime.now(pytz.utc)
+        active_until = now + timedelta(days=10)
+        
+        data = {
+            "phone": phone,
+            "client": client_id,
+            "qualified_at": now.isoformat(),
+            "active_until": active_until.isoformat()
+        }
+        
+        supabase.table("qualified_leads").upsert(data).execute()
+        logger.info(f"Lead {phone} marcado como qualificado por 10 dias")
+    except Exception as e:
+        logger.error(f"Erro ao upsert qualified lead: {str(e)}")
+
+def is_lead_qualified_recently(phone: str, CLIENT_ID: str) -> bool:
+    """Verifica se o lead foi qualificado nos últimos 10 dias"""
+    try:
+        response = supabase.table("qualified_leads") \
+            .select("active_until") \
+            .eq("phone", phone) \
+            .eq("client", CLIENT_ID) \
+            .limit(1) \
+            .execute()
+            
+        if response.data:
+            active_until_str = response.data[0]['active_until']
+            active_until = datetime.fromisoformat(active_until_str.replace('Z', '+00:00'))
+            return datetime.now(pytz.utc) < active_until
+        return False
+    except Exception as e:
+        logger.error(f"Erro ao verificar lead qualificado: {str(e)}")
+        return False
 
 #### Inserção dados CRM 
 def inserir_dados_crm(payload):
@@ -765,6 +845,7 @@ def process_user_message(sender_number: str, message: str, name: str):
         logging.info('enviando msg para grupode qualficacao')
         response = send_whatsapp_message(id_grupo_cliente, msg_qualificacao)
         logging.info(f'Mensagem enviada para o grupo de qualificação: {response.status_code} - {response.text}')
+        upsert_qualified_lead(sender_number, CLIENT_ID)
         
         atualizar_status_lead(numero, "hot")
         logging.info(f"Lead {numero} atualizado para status 'hot' no CRM.")
@@ -1039,10 +1120,12 @@ def get_custom_prompt(query, history_str, intent ,nome_cliente):
             categorias_atendidas=categorias_atendidas
         )
         
+        
     if msg_fechamento_template:
         msg_fechamento = msg_fechamento_template.format(
             horario_atendimento=horario_atendimento
         )
+    logging.info(f"msg de FECHAMENTO -> {msg_fechamento}")
 
     flow = f"""
     ## 🧭 Missão
@@ -1146,33 +1229,11 @@ def get_custom_prompt(query, history_str, intent ,nome_cliente):
     ---
 
     ### 3. 🔁 Entrada de Aparelho (APENAS quando o cliente estiver comprando um iPHONE)
-    Se o cliente estiver interessado em um iPhone:
-    > "Você pretende usar o seu iPhone atual como parte do pagamento?"
-    *** Faça essa pergunta APENAS se o cliente estiver interessado em um iPhone
-    *** Não faça esta pergunta se o cliente estiver interessado em um Android ou outro produto 
-
-    - Se o cliente disser **sim**:
-        - Pergunte:
-        > "Qual o modelo exato do seu aparelho? (Ex: iPhone 11 Pro Max, iPhone SE 2020)"
-        
-        - **Validação rigorosa**:
-            1. Consulte a **Base de Conhecimento** procurando pelo **modelo exato** informado
-            2. Se não encontrar:
-                - Verifique equivalências conhecidas:
-                    - "iPhone X" → "iPhone 10" (e vice-versa)
-                    - "iPhone 11 Pro" ≠ "iPhone 11" (modelos diferentes)
-            3. Critérios de aceite:
-                - ✅ APENAS se encontrar registro COM `aceita_como_entrada = "SIM"`
-                - ❌ Caso contrário: rejeite
-
-        - Responda **baseada estritamente nos resultados**:
-            - Se encontrou modelo equivalente válido:
-            > "Perfeito! Esse modelo é aceito como entrada sim."
-            > "Você saberia me dizer como está a saúde da bateria? E se o aparelho já foi aberto, tem riscos ou trincados?"
-            
-            - Se **não encontrou** ou modelo inválido:
-            > "No momento não estamos aceitando iPhone X/10 como entrada, mas posso te ajudar com outras formas de pagamento! Quer prosseguir?"
-            > *[Aguarde resposta antes de avançar]*
+    - Verifique se o cliente está comprando um iPhone, se não estiver, pule para a próxima etapa (Etapa 4).
+    - Pergunte se o cliente deseja dar um aparelho como entrada:
+    > "Para Iphones, trabalhamos com entrada de aparelhos usados. Você tem algum iPhone para dar como entrada?"
+    - Nunca Fale para o cliente se o Celular dele é ACEITO ou NÃO ACEITO como entrada - Apenas anote e siga o fluxo
+    - Após o cliente responder sobre a entrada, siga para o próximo passo (Etapa 4).
 
     ---
     ### 4. 💳 Validação de Pagamento (APENAS CELULARES)
@@ -1246,6 +1307,7 @@ def get_custom_prompt(query, history_str, intent ,nome_cliente):
     ## ⚠️ Ações Proibidas
     - Não seja repetitivo, evite perguntas já feitas, verifique no ### 🧠 Histórico da Conversa
     - Jamais revele valores específicos, mesmo se o cliente perguntar diretamente
+    - Nunca fale que o aparelho do cliente é aceito ou não como entrada
     - Não fale valores diretamente.
     - Não invente modelos que não estão na Base de Conhecimento.
     - Não elogie aparelhos nem force entusiasmo.
@@ -1409,6 +1471,11 @@ async def messages_upsert(request: Request):
         sender_number = full_jid.split('@')[0]
     else:
         sender_number = full_jid
+    
+    #valida se o lead foi qualificado recentemente
+    if is_lead_qualified_recently(full_jid, CLIENT_ID) and verificar_lead_qualificado is True:
+        logger.info(f"Ignorando mensagem de lead qualificado recentemente: {sender_number}")
+        return JSONResponse(content={"status": "qualified_lead_ignored"}, status_code=200)
 
     with bot_state_lock:
         bot_status = bot_active_per_chat.get(sender_number, True)
@@ -1468,6 +1535,10 @@ async def messages_upsert(request: Request):
             bot_active_per_chat[full_jid] = True
         
         return JSONResponse(content={"status": f"maintenance on for {sender_number}"}, status_code=200)
+    
+    if from_me_flag:
+        logging.info("Mensagem enviada pelo bot, ignorando...")
+        return JSONResponse(content={"status": "message from me ignored"}, status_code=200)
 
     #Verificar se estamos no horário de inatividade
     #if no_horario_inatividade():
