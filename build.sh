@@ -2,8 +2,8 @@ docker login -u cristianofontanadata
 
 passar token de acesso  está no .env 
 
-docker build -t mr_shop .
+docker build -t iclub_castanhal .
 
-docker tag mr_shop:latest cristianofontanadata/mr_shop:latest
+docker tag iclub_castanhal:latest cristianofontanadata/iclub_castanhal:latest
 
-docker push cristianofontanadata/mr_shop:latest
+docker push cristianofontanadata/iclub_castanhal:latest

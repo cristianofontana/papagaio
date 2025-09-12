@@ -1,27 +1,22 @@
-import os
-from supabase import create_client, Client
-from dotenv import load_dotenv
 
-# Carregar variáveis de ambiente
-load_dotenv()
 
-# Carregue as variáveis de ambiente
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
-# Inicialize o cliente Supabase
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+import requests
 
-def listar_profiles():
-    try:
-        response = supabase.table("profiles").select("*").execute()
-        if response.data:
-            for row in response.data:
-                print(row)
-        else:
-            print("Nenhum registro encontrado na tabela profiles.")
-    except Exception as e:
-        print(f"Erro ao consultar a tabela profiles: {e}")
+url = "https://saraevo-evolution-api.jntduz.easypanel.host/message/sendMedia/Papagaio_dev"
 
-if __name__ == "__main__":
-    listar_profiles()
+payload = {
+        "number": '554196137682',
+        "mediatype": "document",
+        "fileName": 'Imoveis_Eder_Maia.pdf',
+        "caption": 'Imovevis Eder Maia, confira todos os detalhes',
+        "media": 'https://xxwqlenrsuslzsrlcqhi.supabase.co/storage/v1/object/public/eder_maia/Imoveis_Eder_Maia.pdf'
+    }
+headers = {
+    "apikey": "E9D4279FF6D9-4EB4-8CCE-93374B6D5FB5",
+    "Content-Type": "application/json"
+}
+
+response = requests.post(url, json=payload, headers=headers)
+
+print(response.json())

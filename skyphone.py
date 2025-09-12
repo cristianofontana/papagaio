@@ -1170,6 +1170,17 @@ def get_custom_prompt(query, history_str, intent ,nome_cliente):
     - Caso identifique que o cliente está incomodado em falar com um Agente Virtual, ofereça ajuda de um humano.
     > Sem problemas, vou te passar para um atendente humado, jaja ele irá entrar em contato com você. Lembrando que nosso horário de atendimento é {horario_atendimento}, ele te chama logo mais!
     
+    ## ⚠️ REGRAS CRÍTICAS SOBRE PREÇOS
+    - **NUNCA mostre preços** em listagens
+    - **NUNCA mencione valores**, mesmo se solicitado
+
+    ## ❗ REGRA DE INSISTÊNCIA EM PREÇOS
+    - Se o cliente perguntar sobre preços mais de DUAS VEZES na mesma conversa:
+    - Imediatamente responda com: 
+    "Olha, eu adoraria te ajudar com isso, vou te passar para um especialista que vai cuidar de você com uma condição especial, beleza? Lembrando que nosso horário de atendimento é {horario_atendimento}."
+    - NÃO continue com o fluxo normal de qualificação
+    - Esta regra tem PRIORIDADE sobre todas as outras
+
     ## ❌ Ações Proibidas
     - Não prometa algo que a loja não oferece
     - Não forneça informações incorretas ou enganosas

@@ -48,8 +48,9 @@ import tempfile
 import openai
 
 
-load_dotenv()
 
+load_dotenv()
+HISTORY_EXPIRATION_MINUTES = 20
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 EVOLUTION_API_KEY = os.getenv("EVO_API_KEY")
@@ -139,9 +140,9 @@ def load_client_config(client_id: str) -> dict:
         return {}
 
 # Carregar configurações do Supabase
-CLIENT_ID = 'iclub_castanhal'  # ID do cliente no Supabase
+CLIENT_ID = 'eder_maia'  # ID do cliente no Supabase
 verificar_lead_qualificado = True  # Ativar verificação de lead qualificado
-HISTORY_EXPIRATION_MINUTES = 180 # 3 horas de buffer das mensagens
+cliente_evo = 'Papagaio_dev'  #COLLECTION_NAME
 
 def get_client_config() -> dict:
     client_config = load_client_config(CLIENT_ID)
@@ -149,17 +150,16 @@ def get_client_config() -> dict:
 
 client_config = get_client_config()
 # Usar valores padrão se a configuração não for encontrada
-nome_do_agent = client_config.get('nome_do_agent', 'Eduardo')
-nome_da_loja = client_config.get('nome_da_loja', 'Não Informado')
-horario_atendimento = client_config.get('horario_atendimento', 'Não Informado')
-endereco_da_loja = client_config.get('endereco_da_loja', 'Não Informado')
-categorias_atendidas = client_config.get('categorias_atendidas', 'Iphone e Acessórios')
-lugares_que_faz_entrega = client_config.get('lugares_que_faz_entrega', '')
-forma_pagamento_iphone = client_config.get('forma_pagamento_iphone', 'à vista e cartão em até 21X')
-forma_pagamento_android = client_config.get('forma_pagamento_android', 'à vista, no cartão em até 21X ou boleto')
-COLLECTION_NAME = client_config.get('collection_name', 'Não Informado')
-cliente_evo = 'Iclub_Castanhal'  #COLLECTION_NAME
-AUTHORIZED_NUMBERS = client_config.get('authorized_numbers', [''])
+nome_do_agent = 'Érika' #client_config.get('nome_do_agent', 'Eduardo')
+nome_da_loja = 'Eder Maia'#client_config.get('nome_da_loja', 'Não Informado')
+horario_atendimento = 'Não Informado' #client_config.get('horario_atendimento', 'Não Informado')
+endereco_da_loja = 'Não Informado' #client_config.get('endereco_da_loja', 'Não Informado')
+#categorias_atendidas = #client_config.get('categorias_atendidas', 'Iphone e Acessórios')
+#lugares_que_faz_entrega = #client_config.get('lugares_que_faz_entrega', '')
+#forma_pagamento_iphone = #client_config.get('forma_pagamento_iphone', 'à vista e cartão em até 21X')
+#forma_pagamento_android = #client_config.get('forma_pagamento_android', 'à vista, no cartão em até 21X ou boleto')
+COLLECTION_NAME = '' #client_config.get('collection_name', 'Não Informado')
+AUTHORIZED_NUMBERS = [''] #client_config.get('authorized_numbers', [''])
 
 id_grupo_cliente =  client_config.get('group_id', 'Não Informado')#'120363420079107628@g.us' #120363420079107628@g.us id grupo papagaio 
 
@@ -170,7 +170,7 @@ id_grupo_cliente =  client_config.get('group_id', 'Não Informado')#'12036342007
 # Adicione esta classe antes da definição do app
 
 class MessageBuffer:
-    def __init__(self, timeout=20): ### 12 horas 
+    def __init__(self, timeout=20): ### alterar para 12 horas 
         self.timeout = timeout
         self.buffers: Dict[str, Dict[str, Any]] = {}
         self.lock = threading.Lock()
@@ -313,12 +313,12 @@ def no_horario_inatividade():
         # Verificar se é dia útil (segunda a sexta)
         ##if dia_semana < 5:  # 0-4 = segunda a sexta
         # Verificar se está entre 8:00 e 18:00
-        #if dia_semana < 5:  # 0-4 = segunda a sexta
-        inicio = datetime.strptime('08:00', '%H:%M').time()
-        fim = datetime.strptime('15:00', '%H:%M').time()
-        
-        if inicio <= hora_atual <= fim:
-            return True
+        if dia_semana < 5:  # 0-4 = segunda a sexta
+            inicio = datetime.strptime('08:00', '%H:%M').time()
+            fim = datetime.strptime('18:00', '%H:%M').time()
+            
+            if inicio <= hora_atual <= fim:
+                return True
                 
         return False
         
@@ -730,7 +730,6 @@ def save_message_to_history(phone_number: str, sender: str, message: str, conver
             "message": message,
             "conversation_id": conversation_id,
             "loja": nome_da_loja,
-            "created_at": datetime.now(pytz.utc).isoformat()
         }
         supabase.table("chat_history").insert(data).execute()
     except Exception as e:
@@ -752,34 +751,6 @@ def is_bot_active(phone: str) -> bool:
     except Exception as e:
         logger.error(f"Erro ao verificar status do bot: {str(e)}")
         return False
-
-def load_conversation_history_from_db(phone_number: str) -> List[Union[HumanMessage, AIMessage]]:
-    """
-    Carrega o histórico de conversa do banco de dados para um número específico
-    """
-    try:
-        # Calcular timestamp de expiração
-        expiry_time = datetime.now(pytz.utc) - timedelta(minutes=20)
-        
-        response = supabase.table("chat_history") \
-            .select("*") \
-            .eq("phone_number", phone_number) \
-            .gte("created_at", expiry_time.isoformat()) \
-            .order("created_at", desc=False) \
-            .execute()
-        
-        messages = []
-        for row in response.data:
-            if row['sender'] == 'user':
-                messages.append(HumanMessage(content=row['message']))
-            elif row['sender'] == 'bot':
-                messages.append(AIMessage(content=row['message']))
-        
-        return messages
-        
-    except Exception as e:
-        logger.error(f"Erro ao carregar histórico do banco: {str(e)}")
-        return []
 
 ##################################################### FIM SUPABASE ##########################################################################################
 
@@ -810,18 +781,6 @@ def process_user_message(sender_number: str, message: str, name: str):
     # Gerar ID único para a conversa se for uma nova
     if sender_number not in conversation_history:
         conversation_id = str(uuid.uuid4())
-        # Carregar histórico do banco de dados se disponível
-        history_from_db = load_conversation_history_from_db(sender_number)
-        if history_from_db:
-            logging.info(f"Histórico carregado do DB para {sender_number}, mensagens: {len(history_from_db)}")
-            conversation_history[sender_number] = {
-                'messages': history_from_db,
-                'conversation_id': conversation_id,
-                'stage': 0,
-                'intent': detect_intent(message),
-                'bant': {'budget': None, 'authority': None, 'need': None, 'timing': None},
-                'last_activity': time.time()
-            }
     else:
         conversation_id = conversation_history[sender_number].get('conversation_id', str(uuid.uuid4()))
     
@@ -830,13 +789,12 @@ def process_user_message(sender_number: str, message: str, name: str):
     # Se nenhuma skill aplicável, continua com o fluxo normal
     current_intent = detect_intent(message)
     
-    # Se não existir no conversation_history, inicializar vazio
+    # Inicializa ou atualiza o histórico da conversa
     if sender_number not in conversation_history:
         conversation_history[sender_number] = {
             'messages': [],
-            'conversation_id': conversation_id,
             'stage': 0,
-            'intent': detect_intent(message),
+            'intent': current_intent,
             'bant': {'budget': None, 'authority': None, 'need': None, 'timing': None},
             'last_activity': time.time()
         }
@@ -846,7 +804,7 @@ def process_user_message(sender_number: str, message: str, name: str):
     # Adiciona a mensagem do usuário ao histórico
     conversation_history[sender_number]['messages'].append(HumanMessage(content=message))
     
-    logging.info(f'HISTORICO DE MENSAGENS: {conversation_history}')
+    logging.info(f'Intenção detectada: {current_intent}')
     
     history = conversation_history[sender_number]['messages'][-20:]
     history_str = "\n".join([f"{msg.type}: {msg.content}" for msg in history])
@@ -886,13 +844,10 @@ def process_user_message(sender_number: str, message: str, name: str):
         logging.info(f"Informações do lead: {infos}")
         
 
-        demanda = infos.get('DEMANDA', 'Não Informado')
         interesse = infos.get('INTERESSE', "Produto não especificado")
-        budget = infos.get('BUDGET/FORMA PAGAMENTO', "Valor não especificado")
+        budget = infos.get('BUDGET', "Valor não especificado")
         urgency = infos.get('URGENCIA', "Não especificado")
         pesquisando = infos.get('ESTA-PESQUISANDO', 'Não Informado')
-        
-        logging.info(f"DEMANDA: {demanda}, INTERESSE: {interesse}, BUDGET: {budget}, URGENCIA: {urgency}, ESTA-PESQUISANDO: {pesquisando}")
         
         msg_qualificacao = f"""
     Lead Qualificado 🔥:
@@ -904,12 +859,9 @@ def process_user_message(sender_number: str, message: str, name: str):
     Esta-Pesquisando: {pesquisando},
     Link: https://wa.me/{numero}
         """
-        
         logging.info('enviando msg para grupode qualficacao')
-        
-        logging.info(f'Mensagem de qualificação: {msg_qualificacao}')
-        id_grupo_cliente =  client_config.get('group_id', 'Não Informado')
         response = send_whatsapp_message(id_grupo_cliente, msg_qualificacao)
+        logging.info(f'Mensagem enviada para o grupo de qualificação: {response.status_code} - {response.text}')
         upsert_qualified_lead(sender_number, CLIENT_ID)
         
         atualizar_status_lead(numero, "hot")
@@ -919,6 +871,19 @@ def process_user_message(sender_number: str, message: str, name: str):
     if response_content.strip() != "#no-answer":
         send_whatsapp_message(sender_number, response_content)
         current_stage = conversation_history[sender_number]['stage']
+        
+        if any(phrase in response_content.lower() for phrase in ["vou te mandar um material", "vou mandar um material", "envio do material"]):
+            time.sleep(10)
+            url_pdf = 'https://xxwqlenrsuslzsrlcqhi.supabase.co/storage/v1/object/public/eder_maia/Imoveis_Eder_Maia.pdf'
+            send_whatsapp_media(sender_number, url_pdf)
+            
+            text = "Todos os detalhes estão sentro deste PDF, inclusive estamos com condições beeeem diferenciadas no preço e no fluxo de pagamento... esse por exemplo temos a condição X"
+            send_whatsapp_message(sender_number,text)
+
+            text = "Se você gostar do empreendimento, me avisa que já vou te conectar direto com o ÉDER, fico no seu aguardo ok ?"
+            send_whatsapp_message(sender_number,text)
+            
+            
         save_conversation_state(
             sender_number=sender_number,
             last_user_message=message,
@@ -1042,6 +1007,38 @@ CONVERSATION_STATES = {
     "CLOSED": 4
 }
 
+
+################## ENVIAR MEDIA 
+
+def send_whatsapp_media(number: str, url: str):
+    """
+    Envia um arquivo de mídia (PDF) via WhatsApp usando a Evolution API.
+    
+    Args:
+        number (str): Número do destinatário
+        url (str): URL do arquivo PDF
+        caption (str): Legenda do arquivo
+        filename (str): Nome do arquivo
+    """
+    payload = {
+        "number": number,
+        "mediatype": "document",
+        "fileName": 'Imoveis_Eder_Maia.pdf',
+        "caption": 'Imoveis Eder Maia, confira todos os detalhes',
+        "media": 'https://xxwqlenrsuslzsrlcqhi.supabase.co/storage/v1/object/public/eder_maia/Imoveis_Eder_Maia.pdf'
+    }
+
+    headers = {
+        "apikey": EVOLUTION_API_KEY,
+        "Content-Type": "application/json"
+    }
+
+    url_api = f"{EVOLUTION_SERVER_URL}message/sendMedia/{cliente_evo}"
+    logging.info(f'URL SEND MEDIA -> {url_api}')
+    response = requests.post(url_api, json=payload, headers=headers)
+    logging.info(f'RESPOSTA DO ENVIO DA MEDIA -> {response}')
+    return response
+
 ##########################################################################  Transcrição de áudio ##########################################################################################
 from openai import OpenAI
 client = OpenAI(api_key=OPENAI_API_KEY)
@@ -1126,38 +1123,33 @@ def get_info(history: list) -> str:
     prompt = f"""
     ## TAREFA
     Analise o histórico de conversa abaixo e extraia 
-    - o *INTERESSE* principal do cliente
-    - a *DEMANDA* (se o interesse do cliente é comprar um celular ou outro produto/serviço)
-    - o *BUDGET/FORMA PAGAMENTO* (valor total que ele tem para comprar o produto, e a forma de pagamento escolhida)
-    - a *URGENCIA* (Quando o cliente pretende comprar o produto)
-    - *ESTA-PESQUISANDO* (Quando o cliente está fazendo o orçamento ou pesquisando em outras lojas)
+    1. o *INTERESSE* principal do cliente
+    2. o *BUDGET/FORMA PAGAMENTO* (valor total que ele tem para comprar o produto, e a forma de pagamento escolhida)
+    3. a *URGENCIA* (Quando o cliente pretende comprar o produto)
+    4. *ESTA-PESQUISANDO* (Quando o cliente está fazendo o orçamento ou pesquisando em outras lojas)
 
     ## INSTRUÇÕES
-    
+
     ### INTERESSE
-    1. Identifique o produto/serviço que o cliente demonstrou interesse. Os serviços incluem: compra, venda, troca, conserto e impressão de documentos.
+    1. Identifique o produto/serviço que o cliente demonstrou interesse.
     2. Seja específico com modelos quando possível (ex: "iPhone 15 Pro" em vez de apenas "iPhone").
     3. Se mencionar troca, inclua ambos os aparelhos (ex: "Troca de iPhone X por iPhone 12").
     4. Para consertos, especifique o problema (ex: "Conserto de tela quebrada").
     5. Priorize o interesse MAIS RECENTE.
-    6. Para impressão de documentos, especifique o tipo (ex: "Impressão de documentos").
-    
-    ### DEMANDA
-    - Caso o Interesse do cliente seja a COMPRA de um celular retorne o valor "Compra"
-    - Caso o Interesse do cliete não seja a COMPRA de um celular retorne o valor "Outro"
+    6. Se não encontrar interesse claro, retorne: "Produto não especificado".
 
     ### BUDGET/FORMA PAGAMENTO
-    - Exemplo com budget e forma de pagamento: "Budget/Forma Pagamento": "5000,00 - Pix" 
-    - Exemplo com budget e sem forma de pagamento: "Budget/Forma Pagamento": "5000,00"
-    - Exemplo sem budget e sem forma de pagamento : "Budget/Forma Pagamento": "Não Informado"
+    1. Exemplo com budget e forma de pagamento: "Budget/Forma Pagamento": "5000,00 - Pix" 
+    2. Exemplo com budget e sem forma de pagamento: "Budget/Forma Pagamento": "5000,00 - Não Informado"
+    3. Exemplo sem budget e sem forma de pagamento : "Budget/Forma Pagamento": "Não Informado"
 
     ### URGENCIA
-    - Idenfique a urgencia do cliente, exemplo: hoje, amanha, semana que vem, mes que vem
-    - Se não houver menção de valor, retorne: "Não especificado".
+    1. Idenfique a urgencia do cliente, exemplo: hoje, amanha, semana que vem, mes que vem
+    2. Se não houver menção de valor, retorne: "Não especificado".
     
     ### ESTA-PESQUISANDO
-    - Idenrifique se o cliente está pesquisando ou orçando em outro estabelecimento 
-    - Exemplo: "ESTA-PESQUISANDO": "Tem orçamento de outra loja, valor: 5200,00"
+    1. Idenrifique se o cliente está pesquisando ou orçando em outro estabelecimento 
+    2. Exemplo: "ESTA-PESQUISANDO": "Tem orçamento de outra loja, valor: 5200,00"
 
     ## IMPORTANTE
     - A resposta deve conter apenas o JSON.
@@ -1183,66 +1175,91 @@ def format_prompt(template, format_vars):
 
 
 def get_custom_prompt(query, history_str, intent ,nome_cliente):
-    client_config = get_client_config()
-    # Usar valores padrão se a configuração não for encontrada
-    nome_do_agent = client_config.get('nome_do_agent', 'Eduardo')
-    nome_da_loja = client_config.get('nome_da_loja', 'Não Informado')
-    horario_atendimento = client_config.get('horario_atendimento', 'Não Informado')
-    endereco_da_loja = client_config.get('endereco_da_loja', 'Não Informado')
-    categorias_atendidas = client_config.get('categorias_atendidas', 'Iphone e Acessórios')
-    forma_pagamento_iphone = client_config.get('forma_pagamento_iphone', 'à vista e cartão em até 21X')
-    forma_pagamento_android = client_config.get('forma_pagamento_android', 'à vista, no cartão em até 21X ou boleto')
+    #client_config = get_client_config()
+    ## Usar valores padrão se a configuração não for encontrada
+    #nome_do_agent = client_config.get('nome_do_agent', 'Eduardo')
+    #nome_da_loja = client_config.get('nome_da_loja', 'Não Informado')
+    #horario_atendimento = client_config.get('horario_atendimento', 'Não Informado')
+    #endereco_da_loja = client_config.get('endereco_da_loja', 'Não Informado')
+    #categorias_atendidas = client_config.get('categorias_atendidas', 'Iphone e Acessórios')
+    #forma_pagamento_iphone = client_config.get('forma_pagamento_iphone', 'à vista e cartão em até 21X')
+    #forma_pagamento_android = client_config.get('forma_pagamento_android', 'à vista, no cartão em até 21X ou boleto')
+    #
+    ## Buscar do banco de dados
+    #lista_iphone = client_config.get('lista_iphone', 'Iphone 11 até Iphone 16 Pro Max')
+    #lista_android = client_config.get('lista_android', 'Xiaomi, Redmi, Poco')
+    #msg_abertura_template  = client_config.get('msg_abertura', '')
+    #msg_fechamento_template  = client_config.get('msg_fechamento', '')
     
-    # Buscar do banco de dados
-    lista_iphone = client_config.get('lista_iphone', 'Iphone 11 até Iphone 16 Pro Max')
-    lista_android = client_config.get('lista_android', 'Xiaomi, Redmi, Poco')
-    msg_abertura_template  = client_config.get('msg_abertura', '')
-    msg_fechamento_template  = client_config.get('msg_fechamento', '')
     
+    flow = """
+    ## 🧭 Missão
+    Você é **Érika**, assistente virtual da imobiliária **Eder Maia**.  
+    Sua função é **atender leads automaticamente**, enviar materiais de apresentação dos empreendimentos e **encaminhar os interessados para um especialista humano (Éder)** finalizar a negociação.  
+
+    ---
+    ## Fluxo de qualificação 
+    1. Abertura 
+    2. Envio Material de apoio
+    3. Identificar o interesse do cliente 
+    4. Mensagem de fechamento 
     
-    if msg_abertura_template:
-        msg_abertura = msg_abertura_template.format(
-            nome_cliente=nome_cliente,
-            nome_do_agent=nome_do_agent,
-            nome_da_loja=nome_da_loja,
-            categorias_atendidas=categorias_atendidas
-        )
-        
-        
-    if msg_fechamento_template:
-        msg_fechamento = msg_fechamento_template.format(
-            horario_atendimento=horario_atendimento
-        )
-    
-    flow = client_config.get('prompt_text', False)
+    ---
+
+    ## 📜 Regras Gerais
+    - Sempre se apresente como **Érika, assistente de vendas da imobiliária Eder Maia**.  
+    - Seja **clara, simpática e objetiva**, sem excesso de formalidade.  
+    - Utilize o **nome do cliente** sempre que disponível.  
+    - **Nunca invente informações** que não estejam no material oficial.  
+    - Para detalhes de preço, condições ou negociação, **encaminhe para o Éder**.  
+    - Se o cliente mostrar interesse em avançar, **ative a ferramenta `Human Handoff`** e avise o Éder no grupo de WhatsApp.  
+    - Não retome a conversa após transferir o lead.  
+
+    ---
+
+    ## 🎯 Fluxo de Conversa e Qualificação
+
+    ### 1. 👋 Abertura
+    - Abra a conversa se apresentando e dizendo com quem você trabalha e o que faz
+    > Oiii, tudo bem? Muito prazer, sou a Érika, assistente de vendas da imobiliária Eder Maia.  
+    > \n
+    > Estamos anunciando alguns imóveis no momento... pra eu te passar a informação mais rápido, me fala qual foi o empreendimento que mais chamou sua atenção.  
+    > \n
+    >  Beira Mar, Alphaville ou Meirelles ?
+
+    ---
+
+    ### 2. ⏱️ Envio Material de apoio 
+    "Certo, me dá 30 segundos que eu já vou te mandar um material com algumas fotos e informações desse empreendimento."
+
+    ---
+
+    ### 3. 📎 Identificar o interesse do cliente 
+    - Identifique o real interesse do usuario  
+
+    ---
+
+    ### 4. 📑 Mensagem de fechamento 
+    - Caso saiba o interesse do Cliente envie algo como:
+    > Que maravilha, fico muito feliz de ter gostado do [Empreendimento citado pelo cliente]! Vou chamar o Eder aqui e em breve ele irá entrar em contato com você!!! Obrigado.
+    - Caso não saiba o interesse do CLiente continue o fluxo
+
+    ---
+
+    ## ⚠️ Ações Proibidas
+    - Não seja repetitivo, evite perguntas já feitas, verifique no ### 🧠 Histórico da Conversa  
+    - Jamais revele valores específicos, mesmo se o cliente perguntar diretamente  
+    - Não fale valores diretamente  
+    - Não invente nada que não esteja na Base de Conhecimento  
+    - Não retome o atendimento depois que encaminhar para o especialista  
+    """
     
     if not flow:
         logging.info("Não foi possivel carregar o prompt")
         return JSONResponse(content={"status": "Problemas ao tentar carregar o prompt"}, status_code=200)
     
-    qdrant_results = query_qdrant(query)
+    #qdrant_results = query_qdrant(query)
 
-    # Preparar variáveis para formatação
-    format_vars = {
-        'nome_do_agent': nome_do_agent,
-        'nome_da_loja': nome_da_loja,
-        'horario_atendimento': horario_atendimento,
-        'endereco_da_loja': endereco_da_loja,
-        'categorias_atendidas': categorias_atendidas,
-        'forma_pagamento_iphone': forma_pagamento_iphone,
-        'forma_pagamento_android': forma_pagamento_android,
-        'lista_iphone': lista_iphone,
-        'lista_android': lista_android,
-        'msg_abertura': msg_abertura,
-        'msg_fechamento': msg_fechamento,
-        'history_str': history_str,
-        'qdrant_results': qdrant_results,
-        'query': query,
-        'nome_cliente': nome_cliente,
-        'intent': intent
-    }
-    
-    formatted_prompt = format_prompt(flow, format_vars)
     
     return f"""
     # 🤖 Agente Virtual: {nome_do_agent}
@@ -1252,11 +1269,8 @@ def get_custom_prompt(query, history_str, intent ,nome_cliente):
     ### 🧠 Histórico da Conversa
     {history_str}
 
-    ### 📚 Base de Conhecimento
-    {qdrant_results}  
-
     ## 🧠 INSTRUÇÕES PARA O AGENTE
-    {formatted_prompt}
+    {flow}
 
     **Mensagem Atual do Cliente:** 
     {query}
@@ -1390,10 +1404,6 @@ async def messages_upsert(request: Request):
         bot_status = bot_active_per_chat.get(sender_number, True)
 
     logging.info(f'STATUS ->>>>>>> {bot_status}')
-    
-    if from_me_flag:
-        logging.info("Mensagem enviada pelo bot, ignorando...")
-        return JSONResponse(content={"status": "message from me ignored"}, status_code=200)
 
     # Extrair a mensagem do usuário
     if msg_type == 'audioMessage':
@@ -1435,7 +1445,7 @@ async def messages_upsert(request: Request):
     name = data['data']['pushName']
 
     # Verificar comandos #off/#on primeiro (sempre funcionam)
-    if any(word in message.strip().lower() for word in ["#off", "off"]):
+    if message.strip().lower() in ["#off", "off"]:
         deletar_mensagem(msg_id, full_jid, from_me_flag)
         with bot_state_lock:
             bot_active_per_chat[full_jid] = False
@@ -1448,6 +1458,10 @@ async def messages_upsert(request: Request):
             bot_active_per_chat[full_jid] = True
         
         return JSONResponse(content={"status": f"maintenance on for {sender_number}"}, status_code=200)
+    
+    if from_me_flag:
+        logging.info("Mensagem enviada pelo bot, ignorando...")
+        return JSONResponse(content={"status": "message from me ignored"}, status_code=200)
 
     #Verificar se estamos no horário de inatividade
     #if no_horario_inatividade():
