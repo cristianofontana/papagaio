@@ -1425,12 +1425,12 @@ async def messages_upsert(request: Request):
             logger.warning("⚠️ Nenhum áudio disponível para transcrição.")
             send_whatsapp_message(full_jid, "Desculpe, estou tendo dificuldades com este audio. Se possivel envie sua mensagem em texto.")
             return JSONResponse(content={"status": "number ignored"}, status_code=200)
-    elif msg_type == 'conversation' and from_me_flag is False:        
-        message = data['data']['message']['conversation']   
-    elif from_me_flag is True:
-        logging.info("Mensagem enviada pelo bot, ignorando processamento.")
-        return JSONResponse(content={"status": "message from bot ignored"}, status_code=200)
-    
+    else:
+        if msg_type == 'audioMessage' and from_me_flag is True:
+            return JSONResponse(content={"status": "Msg de audio enviada pela loja"}, status_code=200)
+        else:        
+            message = data['data']['message']['conversation']   
+
     name = data['data']['pushName']
 
     # Verificar comandos #off/#on primeiro (sempre funcionam)
