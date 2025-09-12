@@ -139,7 +139,7 @@ def load_client_config(client_id: str) -> dict:
         return {}
 
 # Carregar configurações do Supabase
-CLIENT_ID = 'iclub_castanhal'  # ID do cliente no Supabase
+CLIENT_ID = 'iclub_belem'  # ID do cliente no Supabase
 verificar_lead_qualificado = True  # Ativar verificação de lead qualificado
 HISTORY_EXPIRATION_MINUTES = 180 # 3 horas de buffer das mensagens
 
@@ -158,7 +158,7 @@ lugares_que_faz_entrega = client_config.get('lugares_que_faz_entrega', '')
 forma_pagamento_iphone = client_config.get('forma_pagamento_iphone', 'à vista e cartão em até 21X')
 forma_pagamento_android = client_config.get('forma_pagamento_android', 'à vista, no cartão em até 21X ou boleto')
 COLLECTION_NAME = client_config.get('collection_name', 'Não Informado')
-cliente_evo = 'Iclub_Castanhal'  #COLLECTION_NAME
+cliente_evo = 'IClub_Belem'  #COLLECTION_NAME
 AUTHORIZED_NUMBERS = client_config.get('authorized_numbers', [''])
 
 id_grupo_cliente =  client_config.get('group_id', 'Não Informado')#'120363420079107628@g.us' #120363420079107628@g.us id grupo papagaio 
@@ -1390,13 +1390,9 @@ async def messages_upsert(request: Request):
         bot_status = bot_active_per_chat.get(sender_number, True)
 
     logging.info(f'STATUS ->>>>>>> {bot_status}')
-    
-    if from_me_flag:
-        logging.info("Mensagem enviada pelo bot, ignorando...")
-        return JSONResponse(content={"status": "message from me ignored"}, status_code=200)
 
     # Extrair a mensagem do usuário
-    if msg_type == 'audioMessage':
+    if msg_type == 'audioMessage' and from_me_flag is False:
         #if no_horario_inatividade():
         #    logger.info("Áudio recebido no horário de inatividade")
         #    return JSONResponse(content={"status": "inactive_time"}, status_code=200)
@@ -1429,9 +1425,12 @@ async def messages_upsert(request: Request):
             logger.warning("⚠️ Nenhum áudio disponível para transcrição.")
             send_whatsapp_message(full_jid, "Desculpe, estou tendo dificuldades com este audio. Se possivel envie sua mensagem em texto.")
             return JSONResponse(content={"status": "number ignored"}, status_code=200)
-    else:        
+    elif msg_type == 'conversation' and from_me_flag is False:        
         message = data['data']['message']['conversation']   
-
+    elif from_me_flag is True:
+        logging.info("Mensagem enviada pelo bot, ignorando processamento.")
+        return JSONResponse(content={"status": "message from bot ignored"}, status_code=200)
+    
     name = data['data']['pushName']
 
     # Verificar comandos #off/#on primeiro (sempre funcionam)
