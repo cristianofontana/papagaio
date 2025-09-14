@@ -158,7 +158,7 @@ lugares_que_faz_entrega = client_config.get('lugares_que_faz_entrega', '')
 forma_pagamento_iphone = client_config.get('forma_pagamento_iphone', 'à vista e cartão em até 21X')
 forma_pagamento_android = client_config.get('forma_pagamento_android', 'à vista, no cartão em até 21X ou boleto')
 COLLECTION_NAME = client_config.get('collection_name', 'Não Informado')
-cliente_evo = 'IClub_Belem'  #COLLECTION_NAME
+cliente_evo = 'Papagaio_dev'  #COLLECTION_NAME
 AUTHORIZED_NUMBERS = client_config.get('authorized_numbers', [''])
 
 id_grupo_cliente =  client_config.get('group_id', 'Não Informado')#'120363420079107628@g.us' #120363420079107628@g.us id grupo papagaio 
@@ -681,7 +681,8 @@ def save_conversation_state(sender_number: str, last_user_message: str,
 
 def update_reminder_step(phone: str, step: int):
     try:
-        next_reminder_time = datetime.now(pytz.utc) + timedelta(minutes=REACTIVATION_SEQUENCE[step][0])
+        interval, _ = REACTIVATION_SEQUENCE[step]
+        next_reminder_time = datetime.now(pytz.utc) + timedelta(minutes=interval)
         supabase.table("conversation_states").update({
             "reminder_step": step,
             "next_reminder": next_reminder_time.isoformat(),
@@ -702,8 +703,13 @@ def send_reactivation_message():
                 step = row["reminder_step"]
                 
                 if step < len(REACTIVATION_SEQUENCE):
-                    message = REACTIVATION_SEQUENCE[step][1]
-                    send_whatsapp_message(phone, message)
+                    # Obter o tipo de mensagem para este passo
+                    interval, stage_type = REACTIVATION_SEQUENCE[step]
+                    # Gerar mensagem personalizada
+                    message = generate_reactivation_message(phone, stage_type)
+                    if message:
+                        send_whatsapp_message(phone, message)
+                        logger.info(f"Mensagem de reativação enviada para {phone}: {message}")
                     
                     # Atualizar para o próximo passo
                     new_step = step + 1
@@ -781,7 +787,105 @@ def load_conversation_history_from_db(phone_number: str) -> List[Union[HumanMess
         logger.error(f"Erro ao carregar histórico do banco: {str(e)}")
         return []
 
+def load_full_conversation_history(phone_number: str) -> List[dict]:
+    """
+    Carrega todo o histórico de conversa do banco de dados para um número específico
+    """
+    try:
+        response = supabase.table("chat_history") \
+            .select("*") \
+            .eq("phone_number", phone_number) \
+            .order("created_at", desc=False) \
+            .execute()
+        return response.data
+    except Exception as e:
+        logger.error(f"Erro ao carregar histórico completo do banco: {str(e)}")
+        return []
+
 ##################################################### FIM SUPABASE ##########################################################################################
+
+
+#### Inicio Reativacao de conversa
+REACTIVATION_SEQUENCE = [
+    (180, "reengajamento"),   # 3 horas
+    (360, "oferta_limtada"),  # 6 horas
+    (1440, "fechamento_urgencia")  # 24 horas
+]
+
+def get_stage_instructions(stage_type: str) -> str:
+    if stage_type == "reengajamento":
+        return """
+        - Voltar à conversa relembrando o interesse inicial e adicionando um novo argumento de valor.
+        - Usar gatilhos como: Disponibilidade, Garantia, Promoção Relâmpago.
+        - Nunca fale sobre preços ou valores
+        """
+    elif stage_type == "oferta_limtada":
+        return """
+        - Criar um senso de urgência e escassez. A oferta deve ser um benefício, não um desconto.
+        - Ofereça acessórios grátis ou condições especiais.
+        - Deixe claro que a nossa loja pode oferecer condições melhores, e o melhor pós venda da região.
+        """
+    elif stage_type == "fechamento_urgencia":
+        return """
+        - Forçar uma decisão final dando uma "última chance" ou se despedindo educadamente.
+        - Mencione últimas unidades, fim da promoção.
+        """
+    else:
+        return ""
+
+def generate_reactivation_message(phone_number: str, stage_type: str) -> str:
+    """
+    Gera uma mensagem de reativação personalizada com base no histórico e no estágio.
+    stage_type: 'reengajamento', 'oferta_limtada', 'fechamento_urgencia'
+    """
+    try:
+        # Carregar histórico completo
+        messages = load_full_conversation_history(phone_number)
+        if not messages:
+            return None
+
+        # Formatar o histórico
+        history_str = "\n".join([f"{msg['sender']}: {msg['message']}" for msg in messages])
+
+        # Obter o nome do lead (assumindo que a primeira mensagem do user é o nome)
+        user_messages = [msg for msg in messages if msg['sender'] == 'user']
+        name = user_messages[0]['message'].split(':')[0] if user_messages else "Cliente"
+
+        # Obter configuração do cliente
+        client_config = get_client_config()
+        nome_do_agent = client_config.get('nome_do_agent', 'Agente')
+        nome_da_loja = client_config.get('nome_da_loja', 'Loja')
+
+        # Construir o prompt para o LLM
+        prompt = f"""
+        ## Missão
+        Você é {nome_do_agent}, agente virtual da {nome_da_loja}. 
+        Você já teve uma conversa com {name}, agora sua missão será tentar reativa-lo para que ele possa ser qualificado posteriormente. 
+
+        ## Estágio: {stage_type}
+        {get_stage_instructions(stage_type)}
+
+        ## Histórico da Conversa
+        {history_str}
+
+        ## Regras
+        - Personalize a mensagem usando o nome do lead e o interesse demonstrado.
+        - Não fale sobre preços.
+        - Termine com uma pergunta clara (CTA).
+
+        Gere uma mensagem de reativação para o estágio {stage_type}.
+        """
+
+        # Chamar o LLM
+        chat = ChatOpenAI(temperature=0, model="gpt-4o-mini")
+        response = chat.invoke(prompt)
+        return response.content.strip()
+        
+    except Exception as e:
+        logger.error(f"Erro ao gerar mensagem de reativação: {str(e)}")
+        return None
+
+### Fim Reativacao de conversa
 
 def cleanup_expired_histories():
     while True:
@@ -1447,6 +1551,10 @@ async def messages_upsert(request: Request):
             bot_active_per_chat[full_jid] = True
         
         return JSONResponse(content={"status": f"maintenance on for {sender_number}"}, status_code=200)
+    
+    if from_me_flag:
+        logging.info("Mensagem enviada pelo bot, ignorando...")
+        return JSONResponse(content={"status": "message from me ignored"}, status_code=200)
 
     #Verificar se estamos no horário de inatividade
     #if no_horario_inatividade():
