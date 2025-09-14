@@ -404,6 +404,7 @@ async def send_message_webhook(request: Request):
         
         return JSONResponse(content={"status": f"maintenance ON for {numero}"}, status_code=200)
 
+
     if not numero or not mensagem:
         return JSONResponse(content={"error": "numero e mensagem são obrigatórios"}, status_code=400)
 
@@ -1448,6 +1449,10 @@ async def messages_upsert(request: Request):
         
         return JSONResponse(content={"status": f"maintenance on for {sender_number}"}, status_code=200)
 
+    if from_me_flag:
+        logging.info("Mensagem enviada pelo bot, ignorando...")
+        return JSONResponse(content={"status": "message from me ignored"}, status_code=200)
+    
     #Verificar se estamos no horário de inatividade
     #if no_horario_inatividade():
     #    logger.info(f"Mensagem recebida no horário de inatividade: {message}")
