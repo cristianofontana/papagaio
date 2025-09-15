@@ -139,13 +139,13 @@ def load_client_config(client_id: str) -> dict:
         return {}
 
 # Carregar configurações do Supabase
-CLIENT_ID = 'iclub_belem'  # ID do cliente no Supabase
+CLIENT_ID = 'toro_rosso'  # ID do cliente no Supabase
 verificar_lead_qualificado = True  # Ativar verificação de lead qualificado
 HISTORY_EXPIRATION_MINUTES = 180 # 3 horas de buffer das mensagens
 
 def get_client_config() -> dict:
     client_config = load_client_config(CLIENT_ID)
-    return client_config
+    return client_config    
 
 client_config = get_client_config()
 # Usar valores padrão se a configuração não for encontrada
@@ -158,7 +158,7 @@ lugares_que_faz_entrega = client_config.get('lugares_que_faz_entrega', '')
 forma_pagamento_iphone = client_config.get('forma_pagamento_iphone', 'à vista e cartão em até 21X')
 forma_pagamento_android = client_config.get('forma_pagamento_android', 'à vista, no cartão em até 21X ou boleto')
 COLLECTION_NAME = client_config.get('collection_name', 'Não Informado')
-cliente_evo = 'IClub_Belem'  #COLLECTION_NAME
+cliente_evo = 'Papagaio_dev'  #COLLECTION_NAME
 AUTHORIZED_NUMBERS = client_config.get('authorized_numbers', [''])
 
 id_grupo_cliente =  client_config.get('group_id', 'Não Informado')#'120363420079107628@g.us' #120363420079107628@g.us id grupo papagaio 
