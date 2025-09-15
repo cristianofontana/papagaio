@@ -663,18 +663,17 @@ def save_conversation_state(sender_number: str, last_user_message: str,
 
     data = {
         "phone": sender_number,
+        "client_id": CLIENT_ID,  # Add client_id
         "last_user_message": last_user_message,
         "last_bot_message": last_bot_message,
         "stage": stage,
         "last_activity": last_activity.isoformat(),
         "next_reminder": (last_activity + timedelta(minutes=REACTIVATION_SEQUENCE[0][0])).isoformat(),
         "reminder_step": 0,
-        "qualified": qualified  # Agora calculado corretamente
+        "qualified": qualified
     }
     
-    
     try:
-        # Upsert no Supabase
         supabase.table("conversation_states").upsert(data).execute()
     except Exception as e:
         logger.error(f"Erro ao salvar estado no Supabase: {str(e)}")
@@ -687,7 +686,7 @@ def update_reminder_step(phone: str, step: int):
             "reminder_step": step,
             "next_reminder": next_reminder_time.isoformat(),
             "qualified": False
-        }).eq("phone", phone).execute()
+        }).eq("phone", phone).eq("client_id", CLIENT_ID).execute()  # Add client_id filter
     except Exception as e:
         logger.error(f"Erro ao atualizar passo de lembrete: {str(e)}")
 
@@ -696,33 +695,30 @@ def send_reactivation_message():
     while True:
         try:
             now = datetime.now(pytz.utc)
-            result = supabase.table("conversation_states").select("*").lte("next_reminder", now.isoformat()).eq("qualified", False).execute()
+            # Add client_id filter to the query
+            result = supabase.table("conversation_states").select("*").lte("next_reminder", now.isoformat()).eq("qualified", False).eq("client_id", CLIENT_ID).execute()
             
             for row in result.data:
                 phone = row["phone"]
                 step = row["reminder_step"]
                 
                 if step < len(REACTIVATION_SEQUENCE):
-                    # Obter o tipo de mensagem para este passo
                     interval, stage_type = REACTIVATION_SEQUENCE[step]
-                    # Gerar mensagem personalizada
                     message = generate_reactivation_message(phone, stage_type)
                     if message:
                         send_whatsapp_message(phone, message)
                         logger.info(f"Mensagem de reativação enviada para {phone}: {message}")
                     
-                    # Atualizar para o próximo passo
                     new_step = step + 1
                     if new_step < len(REACTIVATION_SEQUENCE):
                         update_reminder_step(phone, new_step)
                     else:
-                        # Remover da lista de acompanhamento
-                        supabase.table("conversation_states").delete().eq("phone", phone).execute()
+                        # Add client_id filter to delete
+                        supabase.table("conversation_states").delete().eq("phone", phone).eq("client_id", CLIENT_ID).execute()
         
         except Exception as e:
             logger.error(f"Erro no envio de reativação: {str(e)}")
         
-        # Verificar a cada minuto
         time.sleep(60)
 
 def save_message_to_history(phone_number: str, sender: str, message: str, conversation_id: str = None):
