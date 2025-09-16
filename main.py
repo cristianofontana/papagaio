@@ -139,7 +139,7 @@ def load_client_config(client_id: str) -> dict:
         return {}
 
 # Carregar configurações do Supabase
-CLIENT_ID = 'iclub_belem'  # ID do cliente no Supabase
+CLIENT_ID = 'toro_rosso'  # ID do cliente no Supabase
 verificar_lead_qualificado = True  # Ativar verificação de lead qualificado
 HISTORY_EXPIRATION_MINUTES = 180 # 3 horas de buffer das mensagens
 
@@ -623,39 +623,6 @@ def atualizar_status_lead(phone: str, novo_status: str):
         return None
 
 # Sequência de reativação (tempo em minutos, mensagem)
-REACTIVATION_SEQUENCE = [
-    (480, 
-f"""Eu não vou aceitar que você suma!
-Aqui, na {nome_da_loja} a gente valoriza muito todas as pessoas que entram em contato com a gente!
-
-Você tá precisando comprar o seu celular em um lugar que te entregue, qualidade e preço justo...
-e isso nós temos de sobra!!!
-a gente pode se ajudar!!!
-me da 5 minutos da sua atenção que eu resolvo sua vida!"""),
-    (960, 
-"""Como eu te disse ontem... Eu não vou te abandonar... Ou voce me dá atenção
-ou eu vou descobrir onde voce mora e ir ai na sua casa!!!
-KKKKKKKKKKKK
-me ajuda a te ajudar!!! Eu preciso bater a meta e você precisa de um novo CELULAR!!!"""),
-    (960*2, 
-"""Você tem dois caminhos:
-Primeiro Caminho: Você vai ver essa mensagem, e vai me ignorar e a gente
-nunca mais vai conversar... Provavelmente você vai comprar em outra loja,
-essa loka, vai te prometer mundos e fundos, mas na hora que você precisar,
-ELES VÃO SUMIR...
-
-Segundo Caminho: Você me da 5 minutos da sua atenção, tempo suficiente 
-pra eu provar que você está na loja certa... Te vendo um produto no preço 
-justo, e com toda a qualidade do mundo, e você vira cliente fiel!
-o segundo caminho é melhor não é ?"""),
-    (960*4, 
-"""
-Uma vez me disseram que pessoas inteligentes são aquelas que estão 
-sempre disponiveis pra conversar e escutar novas propostas...
-eu sei que você precisa de um celular e eu tambem seu que você é uma pessoa inteligente não é ?"""),
-    (960*8, 
-"""Você é inteligente é ?""")
-]
 
 def save_conversation_state(sender_number: str, last_user_message: str, 
                            last_bot_message: str, stage: int, last_activity: datetime):
@@ -702,11 +669,22 @@ def send_reactivation_message():
                 phone = row["phone"]
                 step = row["reminder_step"]
                 
+                conversation_history = load_full_conversation_history(phone)
+                
+                if not should_send_reactivation_llm(phone, conversation_history):
+                    logger.info(f"Pulando reativação para {phone} - LLM determinou que não é lead de compra")
+                    # Marcar como qualificado=false para não reprocessar
+                    supabase.table("conversation_states").update({
+                        "qualified": True  # Marca como "não qualificado para reativação"
+                    }).eq("phone", phone).eq("client_id", CLIENT_ID).execute()
+                    continue
+                
                 if step < len(REACTIVATION_SEQUENCE):
                     interval, stage_type = REACTIVATION_SEQUENCE[step]
                     message = generate_reactivation_message(phone, stage_type)
                     if message:
                         send_whatsapp_message(phone, message)
+                        save_message_to_history(phone, "bot", message)
                         logger.info(f"Mensagem de reativação enviada para {phone}: {message}")
                     
                     new_step = step + 1
@@ -802,11 +780,66 @@ def load_full_conversation_history(phone_number: str) -> List[dict]:
 
 
 #### Inicio Reativacao de conversa
+
 REACTIVATION_SEQUENCE = [
-    (180, "reengajamento"),   # 3 horas
-    (360, "oferta_limtada"),  # 6 horas
-    (1440, "fechamento_urgencia")  # 24 horas
+    (1, "reengajamento"),   # 3 horas
+    (2, "oferta_limtada"),  # 6 horas
+    (3, "fechamento_urgencia")  # 24 horas
 ]
+
+def should_send_reactivation_llm(phone_number: str, conversation_history: list) -> bool:
+    """
+    Usa LLM para analisar se deve enviar mensagens de reativação
+    baseado na intenção de compra no histórico
+    """
+    try:
+        if not conversation_history:
+            return False
+            
+        # Formatar o histórico para análise
+        history_text = "\n".join([f"{msg['sender']}: {msg['message']}" for msg in conversation_history])
+        
+        prompt = f"""
+        ## ANÁLISE DE INTENÇÃO DE COMPRA
+        
+        Analise o histórico de conversa abaixo e determine se este cliente
+        demonstrou interesse genuíno em COMPRAR um celular/produto.
+        
+        ## CRITÉRIOS PARA REATIVAÇÃO (RESPONDER "true"):
+        - Cliente perguntou sobre preços, modelos, estoque
+        - Demonstrou intenção de compra ("quero comprar", "estou interessado")
+        - Pediu orçamento ou condições de pagamento
+        - Estava comparando preços com outras lojas
+        - Perguntou sobre entrada/troca de aparelhos
+        - Mostrou interesse específico em produtos ("iPhone 13", "Samsung S23")
+        
+        ## CRITÉRIOS PARA NÃO REATIVAR (RESPONDER "false"):
+        - Apenas dúvidas técnicas ("como faz backup?", "não consigo conectar")
+        - Solicitações de conserto/reparo ("quebrou a tela", "não liga")
+        - Reclamações sobre produtos já comprados
+        - Informações gerais ("que horas fecham?", "onde fica?")
+        - Orçamentos para acessórios apenas (capinhas, carregadores)
+        - Conversa muito curta sem demonstração de interesse
+        
+        ## HISTÓRICO DA CONVERSA:
+        {history_text}
+        
+        ## RESPOSTA:
+        Responda APENAS com "true" ou "false" (sem aspas, sem explicações).
+        """
+        
+        # Chamar o LLM para análise
+        chat = ChatOpenAI(temperature=0, model="gpt-4o-mini")
+        response = chat.invoke(prompt)
+        decision = response.content.strip().lower()
+        
+        logger.info(f"LLM decision for {phone_number}: {decision}")
+        
+        return decision == "true"
+        
+    except Exception as e:
+        logger.error(f"Erro na análise LLM de reativação: {str(e)}")
+        return False
 
 def get_stage_instructions(stage_type: str) -> str:
     if stage_type == "reengajamento":
@@ -815,8 +848,9 @@ def get_stage_instructions(stage_type: str) -> str:
         - Usar gatilhos como: Disponibilidade, Garantia, Promoção Relâmpago.
         - Nunca fale sobre preços ou valores
         """
-    elif stage_type == "oferta_limtada":
+    elif stage_type == "oferta_limitada":
         return """
+        - Verifique no historico se a mensagem de reengajamento foi respondida ou ignorada, use esta informação no começo da mensagem.
         - Criar um senso de urgência e escassez. A oferta deve ser um benefício, não um desconto.
         - Ofereça acessórios grátis ou condições especiais.
         - Deixe claro que a nossa loja pode oferecer condições melhores, e o melhor pós venda da região.
@@ -832,7 +866,7 @@ def get_stage_instructions(stage_type: str) -> str:
 def generate_reactivation_message(phone_number: str, stage_type: str) -> str:
     """
     Gera uma mensagem de reativação personalizada com base no histórico e no estágio.
-    stage_type: 'reengajamento', 'oferta_limtada', 'fechamento_urgencia'
+    stage_type: 'reengajamento', 'oferta_limitada', 'fechamento_urgencia'
     """
     try:
         # Carregar histórico completo
@@ -1573,7 +1607,7 @@ async def messages_upsert(request: Request):
         message_buffer.add_message(full_jid, message, name)
 
         try:
-            supabase.table("conversation_states").delete().eq("phone", sender_number).execute()
+            supabase.table("conversation_states").delete().eq("phone", sender_number).eq("client_id", CLIENT_ID).execute()
         except Exception as e:
             logger.error(f"Erro ao resetar reativação: {str(e)}")
 
@@ -1584,8 +1618,8 @@ if __name__ == "__main__":
     cleanup_thread.start()
 
     # Iniciar thread de reativação
-    #reactivation_thread = threading.Thread(target=send_reactivation_message, daemon=True)
-    #reactivation_thread.start()
+    reactivation_thread = threading.Thread(target=send_reactivation_message, daemon=True)
+    reactivation_thread.start()
 
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8080)
