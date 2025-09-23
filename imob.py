@@ -140,7 +140,7 @@ def load_client_config(client_id: str) -> dict:
         return {}
 
 # Carregar configurações do Supabase
-CLIENT_ID = 'eder_maia'  # ID do cliente no Supabase
+CLIENT_ID = 'eder'  # ID do cliente no Supabase
 verificar_lead_qualificado = True  # Ativar verificação de lead qualificado
 cliente_evo = 'Papagaio_dev'  #COLLECTION_NAME
 
@@ -877,7 +877,7 @@ def process_user_message(sender_number: str, message: str, name: str):
             url_pdf = 'https://xxwqlenrsuslzsrlcqhi.supabase.co/storage/v1/object/public/eder_maia/Imoveis_Eder_Maia.pdf'
             send_whatsapp_media(sender_number, url_pdf)
             
-            text = "Todos os detalhes estão sentro deste PDF, inclusive estamos com condições beeeem diferenciadas no preço e no fluxo de pagamento... esse por exemplo temos a condição X"
+            text = "Todos os detalhes estão dentro deste PDF, inclusive estamos com condições beeeem diferenciadas no preço e no fluxo de pagamento... esse por exemplo temos a condição X"
             send_whatsapp_message(sender_number,text)
 
             text = "Se você gostar do empreendimento, me avisa que já vou te conectar direto com o ÉDER, fico no seu aguardo ok ?"
@@ -1175,26 +1175,34 @@ def format_prompt(template, format_vars):
 
 
 def get_custom_prompt(query, history_str, intent ,nome_cliente):
-    #client_config = get_client_config()
+    client_config = get_client_config()
     ## Usar valores padrão se a configuração não for encontrada
-    #nome_do_agent = client_config.get('nome_do_agent', 'Eduardo')
-    #nome_da_loja = client_config.get('nome_da_loja', 'Não Informado')
+    nome_do_agent = client_config.get('nome_do_agent', 'Eduardo')
+    nome_da_loja = client_config.get('nome_da_loja', 'Não Informado')
     #horario_atendimento = client_config.get('horario_atendimento', 'Não Informado')
     #endereco_da_loja = client_config.get('endereco_da_loja', 'Não Informado')
-    #categorias_atendidas = client_config.get('categorias_atendidas', 'Iphone e Acessórios')
+    categorias_atendidas = client_config.get('categorias_atendidas', 'Não Informado')
     #forma_pagamento_iphone = client_config.get('forma_pagamento_iphone', 'à vista e cartão em até 21X')
     #forma_pagamento_android = client_config.get('forma_pagamento_android', 'à vista, no cartão em até 21X ou boleto')
     #
     ## Buscar do banco de dados
     #lista_iphone = client_config.get('lista_iphone', 'Iphone 11 até Iphone 16 Pro Max')
     #lista_android = client_config.get('lista_android', 'Xiaomi, Redmi, Poco')
-    #msg_abertura_template  = client_config.get('msg_abertura', '')
+    msg_abertura_template  = client_config.get('msg_abertura', '')
     #msg_fechamento_template  = client_config.get('msg_fechamento', '')
+
+    if msg_abertura_template:
+        msg_abertura = msg_abertura_template.format(
+            nome_cliente=nome_cliente,
+            nome_do_agent=nome_do_agent,
+            nome_da_loja=nome_da_loja,
+            categorias_atendidas=categorias_atendidas
+        )
     
     
-    flow = """
+    flow = f"""
     ## 🧭 Missão
-    Você é **Érika**, assistente virtual da imobiliária **Eder Maia**.  
+    Você é **Érica**, assistente virtual da imobiliária **Eder Maia**.  
     Sua função é **atender leads automaticamente**, enviar materiais de apresentação dos empreendimentos e **encaminhar os interessados para um especialista humano (Éder)** finalizar a negociação.  
 
     ---
@@ -1207,7 +1215,7 @@ def get_custom_prompt(query, history_str, intent ,nome_cliente):
     ---
 
     ## 📜 Regras Gerais
-    - Sempre se apresente como **Érika, assistente de vendas da imobiliária Eder Maia**.  
+    - Sempre se apresente como **Érica, assistente de vendas da imobiliária Eder Maia**.  
     - Seja **clara, simpática e objetiva**, sem excesso de formalidade.  
     - Utilize o **nome do cliente** sempre que disponível.  
     - **Nunca invente informações** que não estejam no material oficial.  
@@ -1218,15 +1226,14 @@ def get_custom_prompt(query, history_str, intent ,nome_cliente):
     ---
 
     ## 🎯 Fluxo de Conversa e Qualificação
-
+    
     ### 1. 👋 Abertura
     - Abra a conversa se apresentando e dizendo com quem você trabalha e o que faz
     > Oiii, tudo bem? Muito prazer, sou a Érika, assistente de vendas da imobiliária Eder Maia.  
     > \n
     > Estamos anunciando alguns imóveis no momento... pra eu te passar a informação mais rápido, me fala qual foi o empreendimento que mais chamou sua atenção.  
     > \n
-    >  Beira Mar, Alphaville ou Meirelles ?
-
+    >  Meireles, Aldeota, Eusébio ?
     ---
 
     ### 2. ⏱️ Envio Material de apoio 
@@ -1259,7 +1266,17 @@ def get_custom_prompt(query, history_str, intent ,nome_cliente):
         return JSONResponse(content={"status": "Problemas ao tentar carregar o prompt"}, status_code=200)
     
     #qdrant_results = query_qdrant(query)
-
+    format_vars = {
+        'nome_do_agent': nome_do_agent,
+        'nome_da_loja': nome_da_loja,
+        'horario_atendimento': horario_atendimento,
+        'endereco_da_loja': endereco_da_loja,
+        'categorias_atendidas': categorias_atendidas,
+        'history_str': history_str,
+        'nome_cliente': nome_cliente
+    }
+    
+    formatted_prompt = format_prompt(flow, format_vars)
     
     return f"""
     # 🤖 Agente Virtual: {nome_do_agent}
@@ -1270,7 +1287,7 @@ def get_custom_prompt(query, history_str, intent ,nome_cliente):
     {history_str}
 
     ## 🧠 INSTRUÇÕES PARA O AGENTE
-    {flow}
+    {formatted_prompt}
 
     **Mensagem Atual do Cliente:** 
     {query}

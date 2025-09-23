@@ -139,7 +139,7 @@ def load_client_config(client_id: str) -> dict:
         return {}
 
 # Carregar configurações do Supabase
-CLIENT_ID = 'toro_rosso'  # ID do cliente no Supabase
+CLIENT_ID = 'eder'  # ID do cliente no Supabase
 verificar_lead_qualificado = True  # Ativar verificação de lead qualificado
 HISTORY_EXPIRATION_MINUTES = 180 # 3 horas de buffer das mensagens
 
@@ -853,6 +853,7 @@ def process_user_message(sender_number: str, message: str, name: str):
     history_str = "\n".join([f"{msg.type}: {msg.content}" for msg in history])
     
     prompt = get_custom_prompt(message, history_str, current_intent, name)
+    logging.info(f"Prompt gerado para {sender_number}:\n{prompt}")
     response = make_answer([SystemMessage(content=prompt)] + history)
     
     conversation_history[sender_number]['messages'].append(response)
