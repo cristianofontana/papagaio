@@ -663,13 +663,20 @@ def send_reactivation_message():
         try:
             now = datetime.now(pytz.utc)
             # Add client_id filter to the query
-            result = supabase.table("conversation_states").select("*").lte("next_reminder", now.isoformat()).eq("qualified", False).eq("client_id", CLIENT_ID).execute()
-            
+            result = supabase.table("conversation_states") \
+                .select("*") \
+                .lte("next_reminder", now.isoformat()) \
+                .eq("qualified", False) \
+                .eq("client_id", CLIENT_ID) \
+                .neq("stage", 4) \
+                .execute()
+            logging.info(f"Reativação - Leads encontrados para reativação: {len(result.data)}")
+                
             for row in result.data:
                 phone = row["phone"]
                 step = row["reminder_step"]
                 
-                conversation_history = load_full_conversation_history(phone)
+                conversation_history = load_full_conversation_history(phone, nome_da_loja)
                 
                 if not should_send_reactivation_llm(phone, conversation_history):
                     logger.info(f"Pulando reativação para {phone} - LLM determinou que não é lead de compra")
@@ -685,11 +692,22 @@ def send_reactivation_message():
                     if message:
                         send_whatsapp_message(phone, message)
                         save_message_to_history(phone, "bot", message)
+                        
                         logger.info(f"Mensagem de reativação enviada para {phone}: {message}")
+                        
+                        ## ATUALIZA STATE para 3 REATIVACAO 
+                        supabase.table("conversation_states") \
+                        .update({"stage": 3}) \
+                        .eq("phone", phone) \
+                        .eq("client_id", CLIENT_ID) \
+                        .execute()
                     
                     new_step = step + 1
                     if new_step < len(REACTIVATION_SEQUENCE):
                         update_reminder_step(phone, new_step)
+                    elif new_step >= 3:
+                        # Último lembrete enviado, deletar da tabela
+                        supabase.table("conversation_states").delete().eq("phone", phone).eq("client_id", CLIENT_ID).execute()
                     else:
                         # Add client_id filter to delete
                         supabase.table("conversation_states").delete().eq("phone", phone).eq("client_id", CLIENT_ID).execute()
@@ -761,7 +779,7 @@ def load_conversation_history_from_db(phone_number: str) -> List[Union[HumanMess
         logger.error(f"Erro ao carregar histórico do banco: {str(e)}")
         return []
 
-def load_full_conversation_history(phone_number: str) -> List[dict]:
+def load_full_conversation_history(phone_number: str, nome_da_loja) -> List[dict]:
     """
     Carrega todo o histórico de conversa do banco de dados para um número específico
     """
@@ -769,6 +787,7 @@ def load_full_conversation_history(phone_number: str) -> List[dict]:
         response = supabase.table("chat_history") \
             .select("*") \
             .eq("phone_number", phone_number) \
+            .eq("loja", nome_da_loja) \
             .order("created_at", desc=False) \
             .execute()
         return response.data
@@ -781,10 +800,108 @@ def load_full_conversation_history(phone_number: str) -> List[dict]:
 
 #### Inicio Reativacao de conversa
 
+def is_stop_request(message: str) -> bool:
+    """
+    Usa LLM para detectar se a mensagem contém solicitação para parar reativação
+    """
+    try:
+        # Prompt otimizado para detecção de stop requests
+        prompt = f"""
+        ## ANALISE DE SOLICITAÇÃO DE INTERRUPÇÃO
+        
+        Analise a mensagem do usuário e determine se ele está solicitando PARAR 
+        as mensagens de reativação/promoção.
+        
+        ## CRITÉRIOS PARA CONSIDERAR COMO "STOP REQUEST":
+        - Pedidos explícitos para parar/envios ("pare", "chega", "stop")
+        - Menção de que já comprou em outro lugar
+        - Solicitação para não receber mais mensagens
+        - Expressões de desinteresse final ("não quero mais", "já resolvi")
+        - Pedidos para ser removido da lista
+        - Frases indicando que o assunto está encerrado
+        
+        ## CRITÉRIOS PARA IGNORAR (NÃO É STOP REQUEST):
+        - Dúvidas sobre produtos
+        - Solicitação de informações
+        - Mensagens de saudação/despedida normais
+        - Perguntas sobre preços/estoque
+        - Expressões de interesse temporário ("mais tarde", "depois")
+        
+        ## MENSAGEM DO USUÁRIO:
+        "{message}"
+        
+        ## RESPOSTA:
+        Responda APENAS com "true" se for uma solicitação de parada OU "false" se não for.
+        Não inclua explicações, apenas "true" ou "false".
+        """
+        
+        # Chamar o LLM
+        chat = ChatOpenAI(temperature=0, model="gpt-4o-mini")
+        response = chat.invoke(prompt)
+        response_content = response.content.strip().lower()
+        
+        logger.info(f"LLM stop request analysis for: '{message}' -> {response_content}")
+        
+        # Verificar resposta
+        if response_content == "true":
+            return True
+        elif response_content == "false":
+            return False
+        else:
+            # Fallback para detecção por palavras-chave se a LLM retornar algo inesperado
+            logger.warning(f"Resposta inesperada da LLM: {response_content}, usando fallback")
+            return fallback_stop_detection(message)
+            
+    except Exception as e:
+        logger.error(f"Erro na análise LLM de stop request: {str(e)}")
+        # Fallback em caso de erro
+        return fallback_stop_detection(message)
+
+def fallback_stop_detection(message: str) -> bool:
+    """
+    Fallback com palavras-chave para quando a LLM falha
+    """
+    stop_keywords = [
+        "pare de enviar", "para de mandar", "chega de mensagem", "não quero receber",
+        "já comprei", "comprei em outro", "stop", "cancelar", "interromper",
+        "não me envie", "não quero mais", "basta", "suficiente", "chega",
+        "remover da lista", "não enviar mais", "parar mensagens", "cancelar envio",
+        "não estou interessado", "já resolvi", "não preciso mais"
+    ]
+    
+    message_lower = message.lower()
+    return any(keyword in message_lower for keyword in stop_keywords)
+
+def load_user_stage_from_db(phone: str) -> int:
+    """
+    Carrega o estágio atual do usuário a partir do banco de dados
+    Retorna o valor do stage (0-4) ou 0 se não encontrado
+    """
+    try:
+        response = supabase.table("conversation_states") \
+            .select("stage") \
+            .eq("phone", phone) \
+            .eq("client_id", CLIENT_ID) \
+            .limit(1) \
+            .execute()
+        
+        if response.data:
+            stage = response.data[0].get('stage', 0)
+            logger.info(f"Stage carregado do DB para {phone}: {stage}")
+            return stage
+        else:
+            logger.info(f"Stage não encontrado para {phone}, usando padrão 0")
+            return 0
+            
+    except Exception as e:
+        logger.error(f"Erro ao carregar stage do DB: {str(e)}")
+        return 0
+
 REACTIVATION_SEQUENCE = [
     (1, "reengajamento"),   # 3 horas
     (2, "oferta_limtada"),  # 6 horas
-    (3, "fechamento_urgencia")  # 24 horas
+    (3, "fechamento_urgencia"),  # 24 horas
+    (4, "stop_reativation")  # never more 
 ]
 
 def should_send_reactivation_llm(phone_number: str, conversation_history: list) -> bool:
@@ -814,6 +931,7 @@ def should_send_reactivation_llm(phone_number: str, conversation_history: list) 
         - Mostrou interesse específico em produtos ("iPhone 13", "Samsung S23")
         
         ## CRITÉRIOS PARA NÃO REATIVAR (RESPONDER "false"):
+        - Cliente explicitamente disse que não quer comprar
         - Apenas dúvidas técnicas ("como faz backup?", "não consigo conectar")
         - Solicitações de conserto/reparo ("quebrou a tela", "não liga")
         - Reclamações sobre produtos já comprados
@@ -870,7 +988,7 @@ def generate_reactivation_message(phone_number: str, stage_type: str) -> str:
     """
     try:
         # Carregar histórico completo
-        messages = load_full_conversation_history(phone_number)
+        messages = load_full_conversation_history(phone_number, nome_da_loja)
         if not messages:
             return None
 
@@ -883,13 +1001,13 @@ def generate_reactivation_message(phone_number: str, stage_type: str) -> str:
 
         # Obter configuração do cliente
         client_config = get_client_config()
-        nome_do_agent = client_config.get('nome_do_agent', 'Agente')
-        nome_da_loja = client_config.get('nome_da_loja', 'Loja')
+        nome_do_agent_local = client_config.get('nome_do_agent', 'Agente')
+        nome_da_loja_local = client_config.get('nome_da_loja', 'Loja')
 
         # Construir o prompt para o LLM
         prompt = f"""
         ## Missão
-        Você é {nome_do_agent}, agente virtual da {nome_da_loja}. 
+        Você é {nome_do_agent_local}, agente virtual da {nome_da_loja_local}. 
         Você já teve uma conversa com {name}, agora sua missão será tentar reativa-lo para que ele possa ser qualificado posteriormente. 
 
         ## Estágio: {stage_type}
@@ -899,7 +1017,12 @@ def generate_reactivation_message(phone_number: str, stage_type: str) -> str:
         {history_str}
 
         ## Regras
-        - Personalize a mensagem usando o nome do lead e o interesse demonstrado.
+        - Começe com um cumprimento personalizado e mais informal. 
+        - Não se apresente mais de uma vez, consulte o histórico. 
+        - Não repita informações já dadas.
+        - Não use emojis.
+        - Se souber use o nome do cliente 
+        - Seja breve e direto, máximo 30 palavras.
         - Não fale sobre preços.
         - Termine com uma pergunta clara (CTA).
 
@@ -941,17 +1064,41 @@ message_buffer = MessageBuffer(timeout=10)
 
 def process_user_message(sender_number: str, message: str, name: str):
 
+    #valida stage do usuario - 0 conversa, 1 orçamento, 2 qualificação, 3 reativação, 4 não reativar
+    stage_from_db = load_user_stage_from_db(sender_number)
+    if stage_from_db == 4:
+            logging.info(f"Usuário {sender_number} está no estágio 4 (não reativar). Ignorando mensagem.")
+            return
+    elif stage_from_db == 3:
+        #state == 3 em reativação, verificar se a msg é de stop request
+        if is_stop_request(message):
+            logging.info(f"Usuário {sender_number} solicitou parar reativação. Atualizando estado para 4.")
+            #atualiza state para 4 stop_reativation
+            supabase.table("conversation_states") \
+            .update({"stage": 4}) \
+            .eq("phone", sender_number) \
+            .eq("client_id", CLIENT_ID) \
+            .execute()
+            return
+        else:
+            logging.info(f"Usuário {sender_number} no estágio 3, mas não é stop request. Continuando conversa.")
+    
+    logging.info(f"STAGE ATUAL: {stage_from_db} para {sender_number}")
+    
     # Gerar ID único para a conversa se for uma nova
     if sender_number not in conversation_history:
         conversation_id = str(uuid.uuid4())
         # Carregar histórico do banco de dados se disponível
         history_from_db = load_conversation_history_from_db(sender_number)
+        
+        # CARREGAR STAGE DO BANCO DE DADOS
+        
         if history_from_db:
             logging.info(f"Histórico carregado do DB para {sender_number}, mensagens: {len(history_from_db)}")
             conversation_history[sender_number] = {
                 'messages': history_from_db,
                 'conversation_id': conversation_id,
-                'stage': 0,
+                'stage': stage_from_db,
                 'intent': detect_intent(message),
                 'bant': {'budget': None, 'authority': None, 'need': None, 'timing': None},
                 'last_activity': time.time()
@@ -969,7 +1116,7 @@ def process_user_message(sender_number: str, message: str, name: str):
         conversation_history[sender_number] = {
             'messages': [],
             'conversation_id': conversation_id,
-            'stage': 0,
+            'stage': stage_from_db if stage_from_db is not None else 0,
             'intent': detect_intent(message),
             'bant': {'budget': None, 'authority': None, 'need': None, 'timing': None},
             'last_activity': time.time()
@@ -979,8 +1126,6 @@ def process_user_message(sender_number: str, message: str, name: str):
     
     # Adiciona a mensagem do usuário ao histórico
     conversation_history[sender_number]['messages'].append(HumanMessage(content=message))
-    
-    logging.info(f'HISTORICO DE MENSAGENS: {conversation_history}')
     
     history = conversation_history[sender_number]['messages'][-20:]
     history_str = "\n".join([f"{msg.type}: {msg.content}" for msg in history])
@@ -1169,11 +1314,11 @@ conversation_history = {}
 
 # Estados da conversa
 CONVERSATION_STATES = {
-    "INITIAL": 0,
-    "NEED_IDENTIFIED": 1,
-    "QUALIFICATION": 2,
-    "HOT_LEAD": 3,
-    "CLOSED": 4
+    "INITIAL": 1,
+    "CONVERSATION": 2,
+    "REATIVACAO": 3,
+    "STOP_REQUEST": 4,
+    "REATIVADO": 5
 }
 
 ##########################################################################  Transcrição de áudio ##########################################################################################
