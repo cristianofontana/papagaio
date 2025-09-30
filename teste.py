@@ -10,7 +10,7 @@ payload = {
         "mediatype": "document",
         "fileName": 'Imoveis_Eder_Maia.pdf',
         "caption": 'Imovevis Eder Maia, confira todos os detalhes',
-        "media": 'https://xxwqlenrsuslzsrlcqhi.supabase.co/storage/v1/object/public/eder_maia/Imoveis_Eder_Maia.pdf'
+        "media": 'https://xxwqlenrsuslzsrlcqhi.supabase.co/storage/v1/object/public/eder_maia/Mansao%20Alphaville%20Fortaleza.pdf'
     }
 headers = {
     "apikey": "E9D4279FF6D9-4EB4-8CCE-93374B6D5FB5",

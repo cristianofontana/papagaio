@@ -142,7 +142,7 @@ def load_client_config(client_id: str) -> dict:
 # Carregar configurações do Supabase
 CLIENT_ID = 'eder'  # ID do cliente no Supabase
 verificar_lead_qualificado = True  # Ativar verificação de lead qualificado
-cliente_evo = 'Papagaio_dev'  #COLLECTION_NAME
+cliente_evo = 'Imobiliaria - Oficial'  #COLLECTION_NAME
 
 def get_client_config() -> dict:
     client_config = load_client_config(CLIENT_ID)
@@ -229,6 +229,22 @@ from qdrant_client import QdrantClient
 QDRANT_URL = os.getenv("QDRANT_URL")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
 EMBEDDING_MODEL = "text-embedding-3-small"  # Modelo usado para embeddings
+
+
+def send_whatsapp_message(number: str, text: str):
+    #logging.info(f'resposta do bot -> {text}')
+    url = f"https://saraevo-evolution-api.jntduz.easypanel.host/message/sendText/{cliente_evo}"
+    payload = {
+        "number": number,
+        "text": text
+    }
+    headers = {
+        "apikey": EVOLUTION_API_KEY,
+        "Content-Type": "application/json"
+    }
+    response = requests.post(url, json=payload, headers=headers)
+    #logging.info(f'response do bot -> {response}')
+    return response
 
 # Inicializar cliente Qdrant
 qdrant_client = QdrantClient(
@@ -773,74 +789,165 @@ def cleanup_expired_histories():
         # Verifica a cada minuto
         time.sleep(60)
     
-def is_requesting_project_info(message: str) -> dict:
+    
+def identify_intent(message: str, history) -> dict:
     """
     Usa LLM para decidir se o usuário está solicitando informações sobre empreendimentos
     e identifica qual empreendimento foi citado.
-    Retorna um dicionário: {"detalhes": true/false, "empreendimento": <nome ou None>}
     """
     chat = ChatOpenAI(temperature=0, model="gpt-4o-mini")
     prompt = f"""
-    Analise a mensagem abaixo e responda APENAS com um JSON no formato:
+    Você é um atendente especialista em imóveis, capaz de identificar a intenção do usuário em mensagens de texto. 
+    
+    ## Missão 
+    - Analisar a Mensagem do usuário
+    - Analisar o histórico de mensagens 
+    - Identificar a intenção do usuário
+    - Identificar o empreendimento citado (se houver)
+    
+    ## Orientações obrigátorias
+    - Você irá receber uma mensagem do usuário e o histórico de mensagens.
+    - Analise a mensagem e o histórico para identificar a intenção do usuário
+    - Para cada intenção existem regras que você deve seguir
+    
+    Fluxo de conversação: 
+    1. Abertura 
+    2. Apresentação dos empreendimentos
+    3. Duvidas e perguntas
+    4. Qualificação
+    
+    ## INTENÇÕES (ESCOLHER APENAS UMA)
+    1. **conversa_normal**: 
+    - Saudações, despedidas, mensagens genéricas ou perguntas não relacionadas a empreendimentos específicos.
+    - Pedidos de informações sobre empreendimentos **não listados** (ex: "quero mais informações" sem citar Meireles ou Alphaville).
+
+    2. **mais_informacoes**: 
+    - **Apenas se o usuário mencionar explicitamente** "Meireles" ou "Alphaville Fortaleza".
+    - Pedidos de detalhes, fotos, materiais ou informações específicas **sobre esses empreendimentos**.
+
+    3. **intencao_de_compra**: 
+    - Verifique o historico de mensagens, só será **intencao_de_compra** se você enviou detalhes sobre os empreendimentos antes.
+    - Interesse em comprar, agendar visita ou negociar um imóvel, **desde que mencione um empreendimento listado**.
+    
+    ## Empreendimentos 
+    - meireles : Quando o cliente estiver referenciando a Meireles
+    - fortaleza: Quando o cliente estiver referenciando a Mansão Alphaville Fortaleza
+    
+    Exemplos de conversas 
+    ### Exemplo 1
+    - Usuário: Olá, vim do anuncio 
+    - Agente: Oiii, tudo bem? Muito prazer, sou a Érica, IA assistente de vendas da imobiliária Eder Maia. \n\n Estamos anunciando alguns imóveis no momento... pra eu te passar a informação mais rápido, me fala qual foi o empreendimento que mais chamou sua atenção.\n\nMeireles e Mansão Alphaville Fortaleza? 
+    - Usuário: Mansão 
+    - Agente: Segue meterial do empreendimento: Mansão Alphaville Fortaleza
+    - Agente: Mansão Alphaville Fortaleza\n\nArquitetura Minimalista ... 
+    - Agente: Caso esteja interessado em conhecer o imóvel, posso te ajudar com mais informações ou agendar uma visita. O que acha?
+    - Usuario: Quero agendar uma visita
+    - Perfeito!!! Vou notificar o Éder, ele é o especialista que vai cuidar do seu atendimento e te ajudar com os próximos passos.
+
+    ### Exemplo 2
+    - Usuário: Quero mais informações sobre o Meireles
+    - Agente: Segue meterial do empreendimento: Meireles
+    - Agente: Meireles\n\nArquitetura Minimalista ... 
+    - Agente: Caso esteja interessado em conhecer o imóvel, posso te ajudar com mais informações ou agendar uma visita. O que acha?
+    - Usuario: pode ser 
+    - Perfeito!!! Vou notificar o Éder, ele é o especialista que vai cuidar do seu atendimento e te ajudar com os próximos passos.
+
+    
+    Mensagem do usuário: {message}
+    
+    Histórico de mensagens: {history}
+
+    ## Formato de Resposta
+    - Responda apenas com um JSON válido no formato:
     {{
-        "detalhes": true/false,  // true se o usuário está solicitando informações, materiais, fotos ou detalhes sobre empreendimentos imobiliários, false caso contrário
+        "intencao": "<intenção identificada>",
         "empreendimento": "<nome do empreendimento citado ou null se não houver>"
     }}
-
-    Exemplos:
-    Usuário: "Quero saber mais sobre o Meireles"
-    Resposta: {{"detalhes": true, "empreendimento": "Meireles"}}
-
-    Usuário: "Me manda o PDF do Alphaville Fortaleza"
-    Resposta: {{"detalhes": true, "empreendimento": "Mansão Alphaville Fortaleza"}}
-
-    Usuário: "Quais são os imóveis disponíveis?"
-    Resposta: {{"detalhes": true, "empreendimento": null}}
-
-    Usuário: "Obrigado, era só isso"
-    Resposta: {{"detalhes": false, "empreendimento": null}}
-
-    Mensagem do usuário:
-    {message}
-
-    Responda apenas com o JSON, sem explicações.
     """
     try:
         response = chat.invoke(prompt)
         result = response.content.strip()
-        # Tenta converter para dict
+        # Limpa possíveis marcações JSON
+        result = result.replace('```json', '').replace('```', '').strip()
         data = json.loads(result)
-        # Garante as chaves esperadas
-        return {
-            "detalhes": bool(data.get("detalhes", False)),
-            "empreendimento": data.get("empreendimento")
-        }
+        return data
     except Exception as e:
-        logger.error(f"Erro ao consultar LLM para detecção de solicitação de informações: {str(e)} | Resposta: {locals().get('result', '')}")
-        return {"detalhes": False, "empreendimento": None}
+        logger.error(f"Erro ao consultar LLM: {str(e)} | Resposta: {result}")
+        return {"intencao": "conversa_normal", "empreendimento": None}
 
+def answer_more_information(response_identify):
+    
+    json_empreendimentos = {
+    "meireles": {
+        "msg":"Lançamento Meireles \n\n- 100 m2, 102 m2 e 108 m2 \n-  3 suítes \n- Sinal  R$ 35 mil \n- Valor R$ 1.268.000\n- Parcela R$ 3.180,00\n- Fluxo de pagamento facilitado."
+        ,"nome": "Apartamento Meireles"
+        ,"url": "https://xxwqlenrsuslzsrlcqhi.supabase.co/storage/v1/object/public/eder_maia/Book%20Apartamento%20Meireles.pdf"
+        }
+    ,"fortaleza": {
+        "msg": "Mansão Alphaville Fortaleza \n\n- Arquitetura Minimalista \n- ⁠Terreno com 580 m2 \n- ⁠Área construída 480 m2 \n- ⁠5 Amplas suítes \n- ⁠Ambientes Amplos e integrados \n- ⁠Valor R$ 6.5 milhões"
+        ,"nome": "Mansão Alphaville Fortaleza"
+        ,"url": 'https://xxwqlenrsuslzsrlcqhi.supabase.co/storage/v1/object/public/eder_maia/Mansao%20Alphaville%20Fortaleza.pdf'
+        }
+    }
+    
+    empreendimento = response_identify.get("empreendimento")
+    
+    return json_empreendimentos[empreendimento]
+
+def send_qualification_message_to_group(history_str, sender_number, name ):
+    
+    sufixo = "@s.whatsapp.net"
+    if sender_number.endswith(sufixo):
+        numero = sender_number[:-len("@s.whatsapp.net")]
+    else:
+        numero = sender_number  # Fallback se não tiver o sufixo
+        
+    infos = get_info(history_str)
+    
+    if isinstance(infos, str):
+        try:
+            infos = json.loads(infos)
+        except Exception as e:
+            logging.error(f"Erro ao converter infos para dict: {e}")
+            infos = {}
+            
+    interesse = infos.get('INTERESSE', "Produto não especificado")
+    budget = infos.get('BUDGET', "Valor não especificado")
+    urgency = infos.get('URGENCIA', "Não especificado")
+    pesquisando = infos.get('ESTA-PESQUISANDO', 'Não Informado')    
+    
+    msg_qualificacao = f"""
+    Lead Qualificado 🔥:
+    Nome: {name},
+    Telefone: {numero},
+    Interesse: {interesse},
+    Budget: {budget},
+    Urgencia: {urgency},
+    Esta-Pesquisando: {pesquisando},
+    Link: https://wa.me/{numero}
+    """
+    
+    logging.info('enviando msg para grupode qualficacao')
+    response = send_whatsapp_message(id_grupo_cliente, msg_qualificacao)
+    logging.info(f'Mensagem enviada para o grupo de qualificação: {response.status_code} - {response.text}')
+    upsert_qualified_lead(sender_number, CLIENT_ID)
+    
 # Variável global para o buffer MEGABUFFER
 message_buffer = MessageBuffer(timeout=10)
 
 def process_user_message(sender_number: str, message: str, name: str):
-
-    # Gerar ID único para a conversa se for uma nova
+    response_content = ""  # <- Inicializa aqui
     if sender_number not in conversation_history:
         conversation_id = str(uuid.uuid4())
     else:
         conversation_id = conversation_history[sender_number].get('conversation_id', str(uuid.uuid4()))
-    
-    #(sender_number, 'user', message, conversation_id)
-    
-    # Se nenhuma skill aplicável, continua com o fluxo normal
-    current_intent = detect_intent(message)
     
     # Inicializa ou atualiza o histórico da conversa
     if sender_number not in conversation_history:
         conversation_history[sender_number] = {
             'messages': [],
             'stage': 0,
-            'intent': current_intent,
+            'intent': None,
             'bant': {'budget': None, 'authority': None, 'need': None, 'timing': None},
             'last_activity': time.time()
         }
@@ -853,127 +960,39 @@ def process_user_message(sender_number: str, message: str, name: str):
     history = conversation_history[sender_number]['messages'][-20:]
     history_str = "\n".join([f"{msg.type}: {msg.content}" for msg in history])
     
-    prompt = get_custom_prompt(message, history_str, current_intent, name)
-    response = make_answer([SystemMessage(content=prompt)] + history)
+    response_identify = identify_intent(message, history_str)
     
-    conversation_history[sender_number]['messages'].append(response)
-    response_content = response.content
-
-    save_message_to_history(sender_number, 'bot', response_content, conversation_id)
+    logging.info(f"Intenção identificada: {response_identify}")
     
-    sufixo = "@s.whatsapp.net"
-
-    if sender_number.endswith(sufixo):
-        numero = sender_number[:-len("@s.whatsapp.net")]
-    else:
-        numero = sender_number  # Fallback se não tiver o sufixo
+    if response_identify.get("intencao") == "conversa_normal":
+        prompt = get_custom_prompt(message, history_str, 1, name)
+        response = make_answer([SystemMessage(content=prompt)] + history)
+        
+        conversation_history[sender_number]['messages'].append(response)
+        response_content = response.content
+        
+        save_message_to_history(sender_number, 'bot', response_content, conversation_id)
+            
+    elif response_identify.get("intencao") == "mais_informacoes":
+        response = answer_more_information(response_identify)
+        send_whatsapp_media(sender_number, response['url'], response['nome'])  
+        response_content = []
+        response_content.append(response['msg'])
+        response_content.append("Caso esteja interessado em conhecer o imóvel, posso te ajudar com mais informações ou agendar uma visita. O que acha?")
     
-    if "orcamento" in response_content.lower() or "orçamento" in response_content.lower():
-        conversation_history[sender_number]['stage'] = 2
-    elif is_qualification_message(response_content):
-        logging.info(f"Qualificação detectada para {sender_number}")
-        infos = get_info(history_str)
-        conversation_history[sender_number]['stage'] = 3
-        logging.info(f"Lead qualificado: {sender_number} - Intent: {conversation_history[sender_number]['intent']}")
+    elif response_identify.get("intencao") == "intencao_de_compra":
+        prompt = get_custom_prompt(message, history_str, response_identify.get("intencao"), name)
+        response = make_answer([SystemMessage(content=prompt)] + history)
+        response_content = response.content
         
-        if isinstance(infos, str):
-            try:
-                infos = json.loads(infos)
-            except Exception as e:
-                logging.error(f"Erro ao converter infos para dict: {e}")
-                infos = {}
+        send_qualification_message_to_group(history_str, sender_number, name)
         
-        logging.info(f"Informações do lead: {infos}")
-        
-
-        interesse = infos.get('INTERESSE', "Produto não especificado")
-        budget = infos.get('BUDGET', "Valor não especificado")
-        urgency = infos.get('URGENCIA', "Não especificado")
-        pesquisando = infos.get('ESTA-PESQUISANDO', 'Não Informado')
-        
-        msg_qualificacao = f"""
-    Lead Qualificado 🔥:
-    Nome: {name},
-    Telefone: {numero},
-    Interesse: {interesse},
-    Budget: {budget},
-    Urgencia: {urgency},
-    Esta-Pesquisando: {pesquisando},
-    Link: https://wa.me/{numero}
-        """
-        logging.info('enviando msg para grupode qualficacao')
-        response = send_whatsapp_message(id_grupo_cliente, msg_qualificacao)
-        logging.info(f'Mensagem enviada para o grupo de qualificação: {response.status_code} - {response.text}')
-        upsert_qualified_lead(sender_number, CLIENT_ID)
-        
-        atualizar_status_lead(numero, "hot")
-        logging.info(f"Lead {numero} atualizado para status 'hot' no CRM.")
-    
-    logging.info(f'Resposta para o Usuario: {response_content}')
-    if response_content.strip() != "#no-answer":
+    if isinstance(response_content, list) and len(response_content) > 1:
+        for resp in response_content:
+            send_whatsapp_message(sender_number, resp)
+            time.sleep(1)  # Pequena pausa entre mensagens
+    else:  
         send_whatsapp_message(sender_number, response_content)
-        current_stage = conversation_history[sender_number]['stage']
-        
-        info = is_requesting_project_info(message)
-        if info["detalhes"]:
-            empreendimento = info["empreendimento"]
-            time.sleep(10)
-            user_message = message.lower()
-
-            if "meireles" in  info["empreendimento"]:
-                url_pdf = 'https://xxwqlenrsuslzsrlcqhi.supabase.co/storage/v1/object/public/eder_maia/Book%20Apartamento%20Meireles.pdf'
-                
-                nome = "Apartamento Meireles"
-                
-                msg_envio = f"""
-Lançamento Meireles 
-
-- 100 m2, 102 m2 e 108 m2 
--  3 suítes 
-- Sinal  R$ 35 mil 
-- Valor R$ 1.268.000
-- Parcela R$ 3.180,00
-- Fluxo de pagamento facilitado.
-                """
-                
-            elif "fortaleza" in user_message or "alphaville" in  info["empreendimento"]:
-                url_pdf = 'https://xxwqlenrsuslzsrlcqhi.supabase.co/storage/v1/object/public/eder_maia/Mansao%20Alphaville%20Fortaleza.pdf'
-                
-                nome = "Alphaville Fortaleza"
-                msg_envio = f"""
-Mansão Alphaville Fortaleza 
-
-- Arquitetura Minimalista 
-- ⁠Terreno com 580 m2 
-- ⁠Área construída 480 m2 
-- ⁠5 Amplas suítes 
-- ⁠Ambientes Amplos e integrados 
-- ⁠Valor R$ 6.5 milhões
-                """
-            else:
-                # Default PDF if no keyword matched
-                url_pdf = 'https://xxwqlenrsuslzsrlcqhi.supabase.co/storage/v1/object/public/eder_maia/Book%20Apartamento%20Meireles.pdf'
-    
-            send_whatsapp_media(sender_number, url_pdf, nome)
-            
-            #text = "Todos os detalhes estão dentro deste PDF, inclusive estamos com condições beeeem diferenciadas no preço e no fluxo de pagamento... esse por exemplo temos a condição X"
-            send_whatsapp_message(sender_number, msg_envio)
-
-            text = "Se você gostar do empreendimento, me avisa que já vou te conectar direto com o Eder, fico no seu aguardo ok ?"
-            send_whatsapp_message(sender_number, text)              
-            
-        save_conversation_state(
-            sender_number=sender_number,
-            last_user_message=message,
-            last_bot_message=response_content,
-            stage=current_stage,
-            last_activity=datetime.now(pytz.utc)
-        )
-        
-        #insere resposta bot no crm
-        #json_responde_bot = make_json_response_bot(chatName=name, chatLid=sender_number, fromMe=True, instanceId='', messageId='', status='SENT', senderName='CRM', messageType='text', messageContent=response_content, phone=numero)
-
-        #inserir_dados_crm(json_responde_bot)
         
 
 def is_qualification_detected(response_text: str, conversation_stage: int) -> bool:
@@ -1252,7 +1271,7 @@ def format_prompt(template, format_vars):
     return template
 
 
-def get_custom_prompt(query, history_str, intent ,nome_cliente):
+def get_custom_prompt(query, history_str, intencao ,nome_cliente):
     client_config = get_client_config()
     ## Usar valores padrão se a configuração não for encontrada
     nome_do_agent = client_config.get('nome_do_agent', 'Eduardo')
@@ -1283,6 +1302,9 @@ def get_custom_prompt(query, history_str, intent ,nome_cliente):
     Você é **Érica**, assistente virtual da imobiliária **Eder Maia**.  
     Sua função é **atender leads automaticamente**, enviar materiais de apresentação dos empreendimentos e **encaminhar os interessados para um especialista humano (Éder)** finalizar a negociação.  
 
+    ## INTENÇÃO DO CLIENTE
+    {intencao}
+    
     ---
     ## Fluxo de qualificação 
     1. Abertura 
@@ -1293,20 +1315,21 @@ def get_custom_prompt(query, history_str, intent ,nome_cliente):
     ---
 
     ## 📜 Regras Gerais
-    - Sempre se apresente como **Érica, assistente de vendas da imobiliária Eder Maia**.  
+    - Sempre se apresente como **Érica, IA assistente de vendas da imobiliária Eder Maia**.  
     - Seja **clara, simpática e objetiva**, sem excesso de formalidade.  
     - Utilize o **nome do cliente** sempre que disponível.  
     - **Nunca invente informações** que não estejam no material oficial.  
     - Para detalhes de preço, condições ou negociação, **encaminhe para o Éder**.  
-    - Se o cliente mostrar interesse em avançar, **ative a ferramenta `Human Handoff`** e avise o Éder no grupo de WhatsApp.  
     - Não retome a conversa após transferir o lead.  
 
     ---
 
     ## 🎯 Fluxo de Conversa e Qualificação
     
-    ### 1. 👋 Abertura
-    - Abra a conversa se apresentando e dizendo com quem você trabalha e o que faz
+    ### 1. 👋 Abertura (Apenas para a primeira mensagem)
+    - Verifique o histórico da conversa para não se apresentar mais de uma vez
+    - use o exemplo abaixo, e garanta que a mensagem tem os empreendimentos disponiveis.
+    Exemplo:
     > Oiii, tudo bem? Muito prazer, sou a Erica, IA assistente de vendas da imobiliária Eder Maia.  
     > \n
     > Estamos anunciando alguns imóveis no momento... pra eu te passar a informação mais rápido, me fala qual foi o empreendimento que mais chamou sua atenção.  
@@ -1314,21 +1337,16 @@ def get_custom_prompt(query, history_str, intent ,nome_cliente):
     >  Meireles e Mansão Alphaville Fortaleza ?
     ---
 
-    ### 2. ⏱️ Envio Material de apoio 
-    "Certo, me dá 30 segundos que eu já vou te mandar um material com algumas fotos e informações desse empreendimento."
-
-    ---
-
-    ### 3. 📎 Identificar o interesse do cliente 
-    - Identifique o real interesse do usuario  
-
-    ---
-
-    ### 4. 📑 Mensagem de fechamento 
-    - Caso saiba o interesse do Cliente envie algo como:
-    > Que maravilha, fico muito feliz de ter gostado do [Empreendimento citado pelo cliente]! Vou chamar o Eder aqui e em breve ele irá entrar em contato com você!!! Obrigado.
-    - Caso não saiba o interesse do CLiente continue o fluxo
-
+    ### 2. 📑 Mensagem de fechamento
+    - Verifique o histórico da conversa 
+    - Verifique a intenção do cliente
+    - Intenção do cliente: {intencao}
+    - tenha certeza que o cliente já recebeu as informações do imóvel
+    - Caso a intenção do cliente seja de compra ou agendar visita: 
+    **VOCÊ DEVE SEMPRE RESPONDER COM A SEGUINTE MENSAGEM:**
+    "Perfeito!!! Vou notificar o Éder, ele é o especialista que vai cuidar do seu atendimento e te ajudar com os próximos passos."
+    - Não invente outras respostas, use exatamente esta mensagem.
+    
     ---
 
     ## ⚠️ Ações Proibidas
@@ -1407,21 +1425,6 @@ def get_text_message_input(recipient, text):
         }
     )
 
-def send_whatsapp_message(number: str, text: str):
-    #logging.info(f'resposta do bot -> {text}')
-    url = f"https://saraevo-evolution-api.jntduz.easypanel.host/message/sendText/{cliente_evo}"
-    payload = {
-        "number": number,
-        "text": text
-    }
-    headers = {
-        "apikey": EVOLUTION_API_KEY,
-        "Content-Type": "application/json"
-    }
-    response = requests.post(url, json=payload, headers=headers)
-    #logging.info(f'response do bot -> {response}')
-    return response
-
 
 @app.post("/messages-upsert")
 async def messages_upsert(request: Request):
@@ -1473,8 +1476,8 @@ async def messages_upsert(request: Request):
 
     valid_numbers = [num for num in AUTHORIZED_NUMBERS if num.strip()]
 
-    logging.info(f'NUMEROS -> {valid_numbers}')
-    logging.info(f"MSG RECEIVED: {data}")
+    #logging.info(f'NUMEROS -> {valid_numbers}')
+    #logging.info(f"MSG RECEIVED: {data}")
 
     if valid_numbers:
         if numero not in valid_numbers:
@@ -1489,6 +1492,19 @@ async def messages_upsert(request: Request):
         sender_number = full_jid.split('@')[0]
     else:
         sender_number = full_jid
+
+    try:
+        response = supabase.table("black_list") \
+            .select("phone") \
+            .eq("client_id", CLIENT_ID) \
+            .eq("phone", sender_number) \
+            .limit(1) \
+            .execute()
+        if response.data:
+            logging.info(f"Número {sender_number} está na blacklist, ignorando mensagem.")
+            return JSONResponse(content={"status": "number in blacklist"}, status_code=200)
+    except Exception as e:
+        logging.error(f"Erro ao consultar blacklist: {str(e)}")
     
     #valida se o lead foi qualificado recentemente
     if is_lead_qualified_recently(full_jid, CLIENT_ID) and verificar_lead_qualificado is True:
@@ -1544,6 +1560,16 @@ async def messages_upsert(request: Request):
         deletar_mensagem(msg_id, full_jid, from_me_flag)
         with bot_state_lock:
             bot_active_per_chat[full_jid] = False
+
+        # Adicionar número à blacklist no Supabase
+        try:
+            supabase.table("black_list").upsert({
+                "client_id": CLIENT_ID,
+                "phone": sender_number
+            }).execute()
+            logging.info(f"Número {sender_number} adicionado à blacklist.")
+        except Exception as e:
+            logging.error(f"Erro ao adicionar número à blacklist: {str(e)}")
         
         return JSONResponse(content={"status": f"maintenance off for {sender_number}"}, status_code=200)
 
