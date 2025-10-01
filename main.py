@@ -707,10 +707,20 @@ def send_reactivation_message():
                         update_reminder_step(phone, new_step)
                     elif new_step >= 3:
                         # Último lembrete enviado, deletar da tabela
-                        supabase.table("conversation_states").delete().eq("phone", phone).eq("client_id", CLIENT_ID).execute()
+                        #supabase.table("conversation_states").delete().eq("phone", phone).eq("client_id", CLIENT_ID).execute()
+                        supabase.table("conversation_states") \
+                        .update({"stage": 4}) \
+                        .eq("phone", phone) \
+                        .eq("client_id", CLIENT_ID) \
+                        .execute()
                     else:
+                        supabase.table("conversation_states") \
+                        .update({"stage": 4}) \
+                        .eq("phone", phone) \
+                        .eq("client_id", CLIENT_ID) \
+                        .execute()
                         # Add client_id filter to delete
-                        supabase.table("conversation_states").delete().eq("phone", phone).eq("client_id", CLIENT_ID).execute()
+                        #supabase.table("conversation_states").delete().eq("phone", phone).eq("client_id", CLIENT_ID).execute()
         
         except Exception as e:
             logger.error(f"Erro no envio de reativação: {str(e)}")
@@ -899,7 +909,7 @@ def load_user_stage_from_db(phone: str) -> int:
 
 REACTIVATION_SEQUENCE = [
     (1, "reengajamento"),   # 3 horas
-    (2, "oferta_limtada"),  # 6 horas
+    (2, "oferta_limitada"),  # 6 horas
     (3, "fechamento_urgencia"),  # 24 horas
     (4, "stop_reativation")  # never more 
 ]
@@ -1079,6 +1089,10 @@ def process_user_message(sender_number: str, message: str, name: str):
             .eq("phone", sender_number) \
             .eq("client_id", CLIENT_ID) \
             .execute()
+            
+            msg = 'Ok! Sem problema. Conte conosco em uma próxima oportunidade.'
+            send_whatsapp_message(sender_number, msg)
+            
             return
         else:
             logging.info(f"Usuário {sender_number} no estágio 3, mas não é stop request. Continuando conversa.")
@@ -1130,7 +1144,11 @@ def process_user_message(sender_number: str, message: str, name: str):
     history = conversation_history[sender_number]['messages'][-20:]
     history_str = "\n".join([f"{msg.type}: {msg.content}" for msg in history])
     
-    prompt = get_custom_prompt(message, history_str, current_intent, name)
+    if stage_from_db != 3 :
+        prompt = get_custom_prompt(message, history_str, current_intent, name)
+    else:
+        logging.info("--------------------------- PROMPT DE REATIVAÇÃO")
+        prompt = get_reativacao_prompt( history_str, message) #history_str, current_message
     response = make_answer([SystemMessage(content=prompt)] + history)
     
     conversation_history[sender_number]['messages'].append(response)
@@ -1459,6 +1477,55 @@ def format_prompt(template, format_vars):
         placeholder = "{" + key + "}"
         template = template.replace(placeholder, str(value))
     return template
+
+def get_reativacao_prompt(history_str, current_message):
+    return f"""
+    ## CONTEXTO DE REATIVAÇÃO
+
+    Você está retomando uma conversa com um lead que estava inativo. O cliente demonstrou interesse anteriormente em produtos Apple/iPhone mas não finalizou a compra. Agora ele respondeu a uma de suas mensagens de reativação.
+
+    ## HISTÓRICO ANTERIOR DA CONVERSA (contexto importante):
+    {history_str}
+
+    ## MENSAGEM DE REATIVAÇÃO DO CLIENTE:
+    "{current_message}"
+
+    ## INSTRUÇÕES ESPECÍFICAS PARA REATIVAÇÃO:
+
+    ### 🎯 COMPORTAMENTO NA REATIVAÇÃO:
+    1. **Reconheça o retorno**: "Que bom ver você de volta!", "Obrigado por retornar!"
+    2. **Relembre rapidamente o contexto anterior**: "Você estava interessado em [produto mencionado anteriormente]"
+    3. **Seja mais direto e objetivo**: O cliente já conhece a loja, não precisa se reapresentar completamente
+    4. **Foque em resolver objeções**: Pergunte se ainda tem interesse ou se surgiu alguma dúvida
+    5. **Mantenha o entusiasmo**: Mostre que está feliz com o retorno dele
+
+    ### 🔄 FLUXO DE QUALIFICAÇÃO NA REATIVAÇÃO:
+    1. **Confirme o interesse atual**: "Você ainda está interessado em algum iPhone específico?"
+    2. **Verifique mudanças**: "Alguma coisa mudou desde nossa última conversa?"
+    3. **Repita qualificação rápida**: 
+    - Interesse em modelos específicos
+    - Forma de pagamento preferida
+    - Urgência na compra
+
+    ### 💡 GATILHOS ESPECIAIS PARA REATIVAÇÃO:
+    - "Lembro que você tinha interesse em [produto], posso verificar as condições atuais?"
+    - "Temos algumas novidades desde nossa última conversa que podem te interessar"
+    - "Vou te passar direto para nosso especialista para condições exclusivas"
+
+    ### 🚫 RESTRIÇÕES:
+    - NÃO repita toda a apresentação inicial
+    - NÃO pergunte informações que já tem no histórico
+    - NÃO seja muito formal - use um tom mais descontraído
+    - NÃO mencione que o cliente "sumiu" ou esteve inativo de forma negativa
+
+    ### 📞 ENCERRAMENTO DA REATIVAÇÃO:
+    Se o cliente demonstrar interesse renovado, qualifique rapidamente e encaminhe:
+    "Perfeito! Vou conectar você direto com nosso especialista em iPhones para te dar condições personalizadas. Um momento!"
+
+    ---
+
+    ## RESPOSTA PARA O CLIENTE (baseada no histórico e mensagem atual):
+    """
 
 
 def get_custom_prompt(query, history_str, intent ,nome_cliente):
