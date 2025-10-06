@@ -625,7 +625,7 @@ def atualizar_status_lead(phone: str, novo_status: str):
 # Sequência de reativação (tempo em minutos, mensagem)
 
 def save_conversation_state(sender_number: str, last_user_message: str, 
-                           last_bot_message: str, stage: int, last_activity: datetime):
+                           last_bot_message: str, stage: int, last_activity: datetime, qualified_status: bool):
     qualified = stage >= 3
 
     data = {
@@ -637,7 +637,7 @@ def save_conversation_state(sender_number: str, last_user_message: str,
         "last_activity": last_activity.isoformat(),
         "next_reminder": (last_activity + timedelta(minutes=REACTIVATION_SEQUENCE[0][0])).isoformat(),
         "reminder_step": 0,
-        "qualified": qualified
+        "qualified": qualified_status
     }
     
     try:
@@ -686,7 +686,7 @@ def send_reactivation_message():
                     }).eq("phone", phone).eq("client_id", CLIENT_ID).execute()
                     continue
                 
-                if step < len(REACTIVATION_SEQUENCE):
+                if step < len(REACTIVATION_SEQUENCE)-1:
                     interval, stage_type = REACTIVATION_SEQUENCE[step]
                     message = generate_reactivation_message(phone, stage_type)
                     if message:
@@ -703,7 +703,7 @@ def send_reactivation_message():
                         .execute()
                     
                     new_step = step + 1
-                    if new_step < len(REACTIVATION_SEQUENCE):
+                    if new_step < len(REACTIVATION_SEQUENCE)-1:
                         update_reminder_step(phone, new_step)
                     elif new_step >= 3:
                         # Último lembrete enviado, deletar da tabela
@@ -1074,6 +1074,7 @@ message_buffer = MessageBuffer(timeout=10)
 
 def process_user_message(sender_number: str, message: str, name: str):
 
+    qualified_status = False
     #valida stage do usuario - 0 conversa, 1 orçamento, 2 qualificação, 3 reativação, 4 não reativar
     stage_from_db = load_user_stage_from_db(sender_number)
     if stage_from_db == 4:
@@ -1147,8 +1148,18 @@ def process_user_message(sender_number: str, message: str, name: str):
     if stage_from_db != 3 :
         prompt = get_custom_prompt(message, history_str, current_intent, name)
     else:
-        logging.info("--------------------------- PROMPT DE REATIVAÇÃO")
+        logging.info("-------------------------------- CUSTOM PROMPT")
+        logging.info(f"phone: {sender_number}, client: {CLIENT_ID}")
+        qualified_status = True
+        response = supabase.table("conversation_states").update({
+            "qualified": qualified_status
+        }).eq("phone", sender_number).eq("client_id", CLIENT_ID).execute()  # Add client_id filter
+        
+        logging.info(f"response update: {response}")
+        
         prompt = get_reativacao_prompt( history_str, message) #history_str, current_message
+    
+    ## constroi resposta para o usuario final     
     response = make_answer([SystemMessage(content=prompt)] + history)
     
     conversation_history[sender_number]['messages'].append(response)
@@ -1221,7 +1232,8 @@ def process_user_message(sender_number: str, message: str, name: str):
             last_user_message=message,
             last_bot_message=response_content,
             stage=current_stage,
-            last_activity=datetime.now(pytz.utc)
+            last_activity=datetime.now(pytz.utc),
+            qualified_status=qualified_status
         )
         
         #insere resposta bot no crm
