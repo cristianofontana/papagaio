@@ -139,7 +139,7 @@ def load_client_config(client_id: str) -> dict:
         return {}
 
 # Carregar configurações do Supabase
-CLIENT_ID = 'toro_rosso'  # ID do cliente no Supabase
+CLIENT_ID = 'five_store'  # ID do cliente no Supabase
 verificar_lead_qualificado = True  # Ativar verificação de lead qualificado
 HISTORY_EXPIRATION_MINUTES = 180 # 3 horas de buffer das mensagens
 
@@ -1082,6 +1082,15 @@ def process_user_message(sender_number: str, message: str, name: str):
             return
     elif stage_from_db == 3:
         #state == 3 em reativação, verificar se a msg é de stop request
+
+        logging.info(f"Usuário {sender_number} respondeu em reativação; removendo do funil.")
+        supabase.table("conversation_states").update({
+            "qualified": True,       # ou use delete() se preferir remover o registro
+            "stage": 0,
+            "reminder_step": 0,
+            "next_reminder": None,
+        }).eq("phone", sender_number).eq("client_id", CLIENT_ID).execute()   
+
         if is_stop_request(message):
             logging.info(f"Usuário {sender_number} solicitou parar reativação. Atualizando estado para 4.")
             #atualiza state para 4 stop_reativation
