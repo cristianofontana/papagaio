@@ -47,9 +47,9 @@ from cryptography.hazmat.primitives import hashes
 import tempfile
 import openai
 
-
 load_dotenv()
 
+HISTORY_EXPIRATION_MINUTES = 180
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 EVOLUTION_API_KEY = os.getenv("EVO_API_KEY")
@@ -139,27 +139,26 @@ def load_client_config(client_id: str) -> dict:
         return {}
 
 # Carregar configurações do Supabase
-CLIENT_ID = 'five_store'  # ID do cliente no Supabase
+CLIENT_ID = 'mobifix'  # ID do cliente no Supabase
 verificar_lead_qualificado = True  # Ativar verificação de lead qualificado
-HISTORY_EXPIRATION_MINUTES = 180 # 3 horas de buffer das mensagens
+cliente_evo = 'Mobifix'  #COLLECTION_NAME
 
 def get_client_config() -> dict:
     client_config = load_client_config(CLIENT_ID)
-    return client_config    
+    return client_config
 
 client_config = get_client_config()
 # Usar valores padrão se a configuração não for encontrada
-nome_do_agent = client_config.get('nome_do_agent', 'Eduardo')
-nome_da_loja = client_config.get('nome_da_loja', 'Não Informado')
-horario_atendimento = client_config.get('horario_atendimento', 'Não Informado')
-endereco_da_loja = client_config.get('endereco_da_loja', 'Não Informado')
-categorias_atendidas = client_config.get('categorias_atendidas', 'Iphone e Acessórios')
-lugares_que_faz_entrega = client_config.get('lugares_que_faz_entrega', '')
-forma_pagamento_iphone = client_config.get('forma_pagamento_iphone', 'à vista e cartão em até 21X')
-forma_pagamento_android = client_config.get('forma_pagamento_android', 'à vista, no cartão em até 21X ou boleto')
-COLLECTION_NAME = client_config.get('collection_name', 'Não Informado')
-cliente_evo = 'Papagaio_dev'  #COLLECTION_NAME
-AUTHORIZED_NUMBERS = client_config.get('authorized_numbers', [''])
+nome_do_agent = 'Érika' #client_config.get('nome_do_agent', 'Eduardo')
+nome_da_loja = 'Toro Rosso'#client_config.get('nome_da_loja', 'Não Informado')
+horario_atendimento = 'Não Informado' #client_config.get('horario_atendimento', 'Não Informado')
+endereco_da_loja = 'Não Informado' #client_config.get('endereco_da_loja', 'Não Informado')
+#categorias_atendidas = #client_config.get('categorias_atendidas', 'Iphone e Acessórios')
+#lugares_que_faz_entrega = #client_config.get('lugares_que_faz_entrega', '')
+#forma_pagamento_iphone = #client_config.get('forma_pagamento_iphone', 'à vista e cartão em até 21X')
+#forma_pagamento_android = #client_config.get('forma_pagamento_android', 'à vista, no cartão em até 21X ou boleto')
+COLLECTION_NAME = '' #client_config.get('collection_name', 'Não Informado')
+AUTHORIZED_NUMBERS = [''] #client_config.get('authorized_numbers', [''])
 
 id_grupo_cliente =  client_config.get('group_id', 'Não Informado')#'120363420079107628@g.us' #120363420079107628@g.us id grupo papagaio 
 
@@ -170,7 +169,7 @@ id_grupo_cliente =  client_config.get('group_id', 'Não Informado')#'12036342007
 # Adicione esta classe antes da definição do app
 
 class MessageBuffer:
-    def __init__(self, timeout=20): ### 12 horas 
+    def __init__(self, timeout=20): ### alterar para 12 horas 
         self.timeout = timeout
         self.buffers: Dict[str, Dict[str, Any]] = {}
         self.lock = threading.Lock()
@@ -229,6 +228,22 @@ from qdrant_client import QdrantClient
 QDRANT_URL = os.getenv("QDRANT_URL")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
 EMBEDDING_MODEL = "text-embedding-3-small"  # Modelo usado para embeddings
+
+
+def send_whatsapp_message(number: str, text: str):
+    #logging.info(f'resposta do bot -> {text}')
+    url = f"https://saraevo-evolution-api.jntduz.easypanel.host/message/sendText/{cliente_evo}"
+    payload = {
+        "number": number,
+        "text": text
+    }
+    headers = {
+        "apikey": EVOLUTION_API_KEY,
+        "Content-Type": "application/json"
+    }
+    response = requests.post(url, json=payload, headers=headers)
+    logging.info(f'response do bot -> {response}')
+    return response
 
 # Inicializar cliente Qdrant
 qdrant_client = QdrantClient(
@@ -313,12 +328,12 @@ def no_horario_inatividade():
         # Verificar se é dia útil (segunda a sexta)
         ##if dia_semana < 5:  # 0-4 = segunda a sexta
         # Verificar se está entre 8:00 e 18:00
-        #if dia_semana < 5:  # 0-4 = segunda a sexta
-        inicio = datetime.strptime('08:00', '%H:%M').time()
-        fim = datetime.strptime('15:00', '%H:%M').time()
-        
-        if inicio <= hora_atual <= fim:
-            return True
+        if dia_semana < 5:  # 0-4 = segunda a sexta
+            inicio = datetime.strptime('08:00', '%H:%M').time()
+            fim = datetime.strptime('18:00', '%H:%M').time()
+            
+            if inicio <= hora_atual <= fim:
+                return True
                 
         return False
         
@@ -404,7 +419,6 @@ async def send_message_webhook(request: Request):
         
         return JSONResponse(content={"status": f"maintenance ON for {numero}"}, status_code=200)
 
-
     if not numero or not mensagem:
         return JSONResponse(content={"error": "numero e mensagem são obrigatórios"}, status_code=400)
 
@@ -475,11 +489,8 @@ def is_lead_qualified_recently(phone: str, CLIENT_ID: str) -> bool:
             .select("active_until") \
             .eq("phone", phone) \
             .eq("client", CLIENT_ID) \
-            .order("qualified_at", desc=True) \
             .limit(1) \
             .execute()
-            
-        logging.info(f"Verificando lead qualificado para {phone}: {response.data}")
             
         if response.data:
             active_until_str = response.data[0]['active_until']
@@ -734,7 +745,6 @@ def save_message_to_history(phone_number: str, sender: str, message: str, conver
             "message": message,
             "conversation_id": conversation_id,
             "loja": nome_da_loja,
-            "created_at": datetime.now(pytz.utc).isoformat()
         }
         supabase.table("chat_history").insert(data).execute()
     except Exception as e:
@@ -757,34 +767,6 @@ def is_bot_active(phone: str) -> bool:
         logger.error(f"Erro ao verificar status do bot: {str(e)}")
         return False
 
-def load_conversation_history_from_db(phone_number: str) -> List[Union[HumanMessage, AIMessage]]:
-    """
-    Carrega o histórico de conversa do banco de dados para um número específico
-    """
-    try:
-        # Calcular timestamp de expiração
-        expiry_time = datetime.now(pytz.utc) - timedelta(minutes=20)
-        
-        response = supabase.table("chat_history") \
-            .select("*") \
-            .eq("phone_number", phone_number) \
-            .gte("created_at", expiry_time.isoformat()) \
-            .order("created_at", desc=False) \
-            .execute()
-        
-        messages = []
-        for row in response.data:
-            if row['sender'] == 'user':
-                messages.append(HumanMessage(content=row['message']))
-            elif row['sender'] == 'bot':
-                messages.append(AIMessage(content=row['message']))
-        
-        return messages
-        
-    except Exception as e:
-        logger.error(f"Erro ao carregar histórico do banco: {str(e)}")
-        return []
-
 ##################################################### FIM SUPABASE ##########################################################################################
 
 def cleanup_expired_histories():
@@ -806,41 +788,81 @@ def cleanup_expired_histories():
         # Verifica a cada minuto
         time.sleep(60)
 
+
+def answer_more_information(response_identify):
+    
+    json_empreendimentos = {
+    "meireles": {
+        "msg":"Lançamento Meireles \n\n- 100 m2, 102 m2 e 108 m2 \n-  3 suítes \n- Sinal  R$ 35 mil \n- Valor R$ 1.268.000\n- Parcela R$ 3.180,00\n- Fluxo de pagamento facilitado."
+        ,"nome": "Apartamento Meireles"
+        ,"url": "https://xxwqlenrsuslzsrlcqhi.supabase.co/storage/v1/object/public/eder_maia/Book%20Apartamento%20Meireles.pdf"
+        }
+    ,"fortaleza": {
+        "msg": "Mansão Alphaville Fortaleza \n\n- Arquitetura Minimalista \n- ⁠Terreno com 580 m2 \n- ⁠Área construída 480 m2 \n- ⁠5 Amplas suítes \n- ⁠Ambientes Amplos e integrados \n- ⁠Valor R$ 6.5 milhões"
+        ,"nome": "Mansão Alphaville Fortaleza"
+        ,"url": 'https://xxwqlenrsuslzsrlcqhi.supabase.co/storage/v1/object/public/eder_maia/Mansao%20Alphaville%20Fortaleza.pdf'
+        }
+    }
+    
+    empreendimento = response_identify.get("empreendimento")
+    
+    return json_empreendimentos[empreendimento]
+
+def send_qualification_message_to_group(history_str, sender_number, name ):
+    
+    sufixo = "@s.whatsapp.net"
+    if sender_number.endswith(sufixo):
+        numero = sender_number[:-len("@s.whatsapp.net")]
+    else:
+        numero = sender_number  # Fallback se não tiver o sufixo
+        
+    infos = get_info(history_str, numero)
+    
+    if isinstance(infos, str):
+        try:
+            infos = json.loads(infos)
+        except Exception as e:
+            logging.error(f"Erro ao converter infos para dict: {e}")
+            infos = {}
+            
+    interesse = infos.get('INTERESSE', "Produto não especificado")
+    budget = infos.get('BUDGET', "Valor não especificado")
+    urgency = infos.get('URGENCIA', "Não especificado")
+    pesquisando = infos.get('ESTA-PESQUISANDO', 'Não Informado')    
+    
+    msg_qualificacao = f"""
+    Lead Qualificado 🔥:
+    Nome: {name},
+    Telefone: {numero},
+    Interesse: {interesse},
+    Budget: {budget},
+    Urgencia: {urgency},
+    Esta-Pesquisando: {pesquisando},
+    Link: https://wa.me/{numero}
+    """
+    
+    logging.info('enviando msg para grupode qualficacao')
+    response = send_whatsapp_message(id_grupo_cliente, msg_qualificacao)
+    logging.info(f'Mensagem enviada para o grupo de qualificação: {response.status_code} - {response.text}')
+    upsert_qualified_lead(sender_number, CLIENT_ID)
+    
 # Variável global para o buffer MEGABUFFER
 message_buffer = MessageBuffer(timeout=10)
 
 def process_user_message(sender_number: str, message: str, name: str):
-
-    # Gerar ID único para a conversa se for uma nova
+    logging.info(f"Processando mensagem de {sender_number}: {message}")
+    response_content = ""  # <- Inicializa aqui
     if sender_number not in conversation_history:
         conversation_id = str(uuid.uuid4())
-        # Carregar histórico do banco de dados se disponível
-        history_from_db = load_conversation_history_from_db(sender_number)
-        if history_from_db:
-            logging.info(f"Histórico carregado do DB para {sender_number}, mensagens: {len(history_from_db)}")
-            conversation_history[sender_number] = {
-                'messages': history_from_db,
-                'conversation_id': conversation_id,
-                'stage': 0,
-                'intent': detect_intent(message),
-                'bant': {'budget': None, 'authority': None, 'need': None, 'timing': None},
-                'last_activity': time.time()
-            }
     else:
         conversation_id = conversation_history[sender_number].get('conversation_id', str(uuid.uuid4()))
     
-    #(sender_number, 'user', message, conversation_id)
-    
-    # Se nenhuma skill aplicável, continua com o fluxo normal
-    current_intent = detect_intent(message)
-    
-    # Se não existir no conversation_history, inicializar vazio
+    # Inicializa ou atualiza o histórico da conversa
     if sender_number not in conversation_history:
         conversation_history[sender_number] = {
             'messages': [],
-            'conversation_id': conversation_id,
             'stage': 0,
-            'intent': detect_intent(message),
+            'intent': None,
             'bant': {'budget': None, 'authority': None, 'need': None, 'timing': None},
             'last_activity': time.time()
         }
@@ -850,91 +872,39 @@ def process_user_message(sender_number: str, message: str, name: str):
     # Adiciona a mensagem do usuário ao histórico
     conversation_history[sender_number]['messages'].append(HumanMessage(content=message))
     
-    logging.info(f'HISTORICO DE MENSAGENS: {conversation_history}')
-    
     history = conversation_history[sender_number]['messages'][-20:]
     history_str = "\n".join([f"{msg.type}: {msg.content}" for msg in history])
     
-    prompt = get_custom_prompt(message, history_str, current_intent, name)
-    response = make_answer([SystemMessage(content=prompt)] + history)
+    prompt = get_custom_prompt(message, history_str, 1, name)
+    response_dict = make_answer([SystemMessage(content=prompt)] + history)
     
-    conversation_history[sender_number]['messages'].append(response)
-    response_content = response.content
-
-    save_message_to_history(sender_number, 'bot', response_content, conversation_id)
+    response_content = response_dict["respostas"]
+    fase = response_dict["fase"]
     
-    logging.info(f"BANT STATUS {conversation_history[sender_number]['bant']}")
-
-    sufixo = "@s.whatsapp.net"
-
-    if sender_number.endswith(sufixo):
-        numero = sender_number[:-len("@s.whatsapp.net")]
-    else:
-        numero = sender_number  # Fallback se não tiver o sufixo
+    logging.info(f"Fase da conversa para {sender_number}: {fase}")  
     
-    if "orcamento" in response_content.lower() or "orçamento" in response_content.lower():
-        conversation_history[sender_number]['stage'] = 2
-    elif is_qualification_message(response_content):
+    if fase == 6: ##is_qualification_message(response_content):
         logging.info(f"Qualificação detectada para {sender_number}")
-        infos = get_info(history_str)
-        conversation_history[sender_number]['stage'] = 3
-        logging.info(f"Lead qualificado: {sender_number} - Intent: {conversation_history[sender_number]['intent']}")
         
-        if isinstance(infos, str):
-            try:
-                infos = json.loads(infos)
-            except Exception as e:
-                logging.error(f"Erro ao converter infos para dict: {e}")
-                infos = {}
-        
-        logging.info(f"Informações do lead: {infos}")
+        sufixo = "@s.whatsapp.net"
+        if sender_number.endswith(sufixo):
+            numero = sender_number[:-len("@s.whatsapp.net")]
+        else:
+            numero = sender_number  # Fallback se não tiver o sufixo
+            
+        msg_qualificacao = get_info(history_str, numero)
         
 
-        demanda = infos.get('DEMANDA', 'Não Informado')
-        interesse = infos.get('INTERESSE', "Produto não especificado")
-        budget = infos.get('BUDGET/FORMA PAGAMENTO', "Valor não especificado")
-        urgency = infos.get('URGENCIA', "Não especificado")
-        pesquisando = infos.get('ESTA-PESQUISANDO', 'Não Informado')
-        
-        logging.info(f"DEMANDA: {demanda}, INTERESSE: {interesse}, BUDGET: {budget}, URGENCIA: {urgency}, ESTA-PESQUISANDO: {pesquisando}")
-        
-        msg_qualificacao = f"""
-    Lead Qualificado 🔥:
-    Nome: {name},
-    Telefone: {numero},
-    Interesse: {interesse},
-    Budget: {budget},
-    Urgencia: {urgency},
-    Esta-Pesquisando: {pesquisando},
-    Link: https://wa.me/{numero}
-        """
-        
         logging.info('enviando msg para grupode qualficacao')
         
-        logging.info(f'Mensagem de qualificação: {msg_qualificacao}')
         id_grupo_cliente =  client_config.get('group_id', 'Não Informado')
         response = send_whatsapp_message(id_grupo_cliente, msg_qualificacao)
         upsert_qualified_lead(sender_number, CLIENT_ID)
-        
-        atualizar_status_lead(numero, "hot")
-        logging.info(f"Lead {numero} atualizado para status 'hot' no CRM.")
     
-    logging.info(f'Resposta para o Usuario: {response_content}')
-    if response_content.strip() != "#no-answer":
-        send_whatsapp_message(sender_number, response_content)
-        current_stage = conversation_history[sender_number]['stage']
-        save_conversation_state(
-            sender_number=sender_number,
-            last_user_message=message,
-            last_bot_message=response_content,
-            stage=current_stage,
-            last_activity=datetime.now(pytz.utc)
-        )
-        
-        #insere resposta bot no crm
-        #json_responde_bot = make_json_response_bot(chatName=name, chatLid=sender_number, fromMe=True, instanceId='', messageId='', status='SENT', senderName='CRM', messageType='text', messageContent=response_content, phone=numero)
-
-        #inserir_dados_crm(json_responde_bot)
+    for r in response_content: 
+        logging.info(f"Enviando mensagem para {sender_number}: {r}")
+        conversation_history[sender_number]['messages'].append(AIMessage(content=r))
+        send_whatsapp_message(sender_number, r)
         
 
 def is_qualification_detected(response_text: str, conversation_stage: int) -> bool:
@@ -967,9 +937,7 @@ def is_qualification_message(message: str) -> bool:
     baseando-se em padrões como "vou notificar um vendedor" ou equivalentes.
     """
     # Configuração do modelo
-    chat = ChatOpenAI(
-        temperature=0, 
-        model="gpt-4o-mini")
+    chat = ChatOpenAI(temperature=0, model="gpt-4o-mini")
     
     # Prompt mais confiável com formato de resposta simplificado
     prompt = f"""
@@ -993,10 +961,6 @@ def is_qualification_message(message: str) -> bool:
     
     try:
         # Chamada ao modelo
-        system = SystemMessage(content=(
-        "Você é um assistente. NÃO realize buscas na web, NÃO use ferramentas externas e NÃO acesse URLs. "
-        "Responda apenas com base no contexto e no histórico fornecidos."
-        ))
         response = chat.invoke(prompt)
         response_content = response.content.strip().lower()
         
@@ -1051,6 +1015,38 @@ CONVERSATION_STATES = {
     "HOT_LEAD": 3,
     "CLOSED": 4
 }
+
+
+################## ENVIAR MEDIA 
+
+def send_whatsapp_media(number: str, url: str,nome):
+    """
+    Envia um arquivo de mídia (PDF) via WhatsApp usando a Evolution API.
+    
+    Args:
+        number (str): Número do destinatário
+        url (str): URL do arquivo PDF
+        caption (str): Legenda do arquivo
+        filename (str): Nome do arquivo
+    """
+    payload = {
+        "number": number,
+        "mediatype": "document",
+        "fileName": f"{nome}.pdf",
+        "caption": f'Segue meterial do empreendimento: {nome}',
+        "media": url
+    }
+
+    headers = {
+        "apikey": EVOLUTION_API_KEY,
+        "Content-Type": "application/json"
+    }
+
+    url_api = f"{EVOLUTION_SERVER_URL}message/sendMedia/{cliente_evo}"
+    logging.info(f'URL SEND MEDIA -> {url_api}')
+    response = requests.post(url_api, json=payload, headers=headers)
+    logging.info(f'RESPOSTA DO ENVIO DA MEDIA -> {response}')
+    return response
 
 ##########################################################################  Transcrição de áudio ##########################################################################################
 from openai import OpenAI
@@ -1131,58 +1127,39 @@ def transcrever_audio_base64(audio_base64: str) -> str:
 # Habilitar chave da OpenAI
 os.environ['OPENAI_API_KEY'] = os.getenv("OPENAI_API_KEY")
 
-def get_info(history: list) -> str:
+def get_info(history: list, numero) -> str:
 
     prompt = f"""
     ## TAREFA
     Analise o histórico de conversa abaixo e extraia 
-    - o *INTERESSE* principal do cliente
-    - a *DEMANDA* (se o interesse do cliente é comprar um celular ou outro produto/serviço)
-    - o *BUDGET/FORMA PAGAMENTO* (valor total que ele tem para comprar o produto, e a forma de pagamento escolhida)
-    - a *URGENCIA* (Quando o cliente pretende comprar o produto)
-    - *ESTA-PESQUISANDO* (Quando o cliente está fazendo o orçamento ou pesquisando em outras lojas)
+    * Nome: [nome completo]
+    * Data Nascimento: [data nascimento]
+    * Telefone: Link: https://wa.me/{numero}
+    * CPF: [cpf]
+    * RG: [RG]
+    * Endereço: [endereço]
+    * Email: [Email]
 
-    ## INSTRUÇÕES
-    
-    ### INTERESSE
-    1. Identifique o produto/serviço que o cliente demonstrou interesse. Os serviços incluem: compra, venda, troca, conserto e impressão de documentos.
-    2. Seja específico com modelos quando possível (ex: "iPhone 15 Pro" em vez de apenas "iPhone").
-    3. Se mencionar troca, inclua ambos os aparelhos (ex: "Troca de iPhone X por iPhone 12").
-    4. Para consertos, especifique o problema (ex: "Conserto de tela quebrada").
-    5. Priorize o interesse MAIS RECENTE.
-    6. Para impressão de documentos, especifique o tipo (ex: "Impressão de documentos").
-    
-    ### DEMANDA
-    - Caso o Interesse do cliente seja a COMPRA de um celular retorne o valor "Compra"
-    - Caso o Interesse do cliete não seja a COMPRA de um celular retorne o valor "Outro"
-
-    ### BUDGET/FORMA PAGAMENTO
-    - Exemplo com budget e forma de pagamento: "Budget/Forma Pagamento": "5000,00 - Pix" 
-    - Exemplo com budget e sem forma de pagamento: "Budget/Forma Pagamento": "5000,00"
-    - Exemplo sem budget e sem forma de pagamento : "Budget/Forma Pagamento": "Não Informado"
-
-    ### URGENCIA
-    - Idenfique a urgencia do cliente, exemplo: hoje, amanha, semana que vem, mes que vem
-    - Se não houver menção de valor, retorne: "Não especificado".
-    
-    ### ESTA-PESQUISANDO
-    - Idenrifique se o cliente está pesquisando ou orçando em outro estabelecimento 
-    - Exemplo: "ESTA-PESQUISANDO": "Tem orçamento de outra loja, valor: 5200,00"
-
-    ## IMPORTANTE
-    - A resposta deve conter apenas o JSON.
-    - Não adicione comentários, explicações ou qualquer outro texto fora do JSON.
-    - Certifique-se de que o JSON está formatado corretamente sem ``` e sem a palavra "json" escrito, apenas as keys, valores e chaves.
+    ## FORMATO DE RESPOSTA
+    > Novo Pagamento Realizado 🤑
+    > Nome: [nome completo]
+    > Data Nascimento: [data nascimento]
+    > Telefone: Link: https://wa.me/{numero}
+    > CPF: [cpf]
+    > RG: [RG]
+    > Endereço: [endereço]
+    > Email: [Email]
 
     ## HISTÓRICO
     {history}
+    
+    ##Contato 
+    {numero}
+    
     """
 
     # Substituído Groq por OpenAI
-    chat = ChatOpenAI(
-        temperature=0, 
-        model="gpt-4o-mini"
-    )
+    chat = ChatOpenAI(temperature=0, model="gpt-4o-mini")
     response = chat.invoke(prompt)
 
     return response.content.strip()
@@ -1195,24 +1172,13 @@ def format_prompt(template, format_vars):
     return template
 
 
-def get_custom_prompt(query, history_str, intent ,nome_cliente):
+def get_custom_prompt(query, history_str, intencao ,nome_cliente):
     client_config = get_client_config()
-    # Usar valores padrão se a configuração não for encontrada
     nome_do_agent = client_config.get('nome_do_agent', 'Eduardo')
     nome_da_loja = client_config.get('nome_da_loja', 'Não Informado')
-    horario_atendimento = client_config.get('horario_atendimento', 'Não Informado')
-    endereco_da_loja = client_config.get('endereco_da_loja', 'Não Informado')
-    categorias_atendidas = client_config.get('categorias_atendidas', 'Iphone e Acessórios')
-    forma_pagamento_iphone = client_config.get('forma_pagamento_iphone', 'à vista e cartão em até 21X')
-    forma_pagamento_android = client_config.get('forma_pagamento_android', 'à vista, no cartão em até 21X ou boleto')
-    
-    # Buscar do banco de dados
-    lista_iphone = client_config.get('lista_iphone', 'Iphone 11 até Iphone 16 Pro Max')
-    lista_android = client_config.get('lista_android', 'Xiaomi, Redmi, Poco')
+    categorias_atendidas = client_config.get('categorias_atendidas', 'Não Informado')
     msg_abertura_template  = client_config.get('msg_abertura', '')
-    msg_fechamento_template  = client_config.get('msg_fechamento', '')
-    
-    
+
     if msg_abertura_template:
         msg_abertura = msg_abertura_template.format(
             nome_cliente=nome_cliente,
@@ -1220,39 +1186,143 @@ def get_custom_prompt(query, history_str, intent ,nome_cliente):
             nome_da_loja=nome_da_loja,
             categorias_atendidas=categorias_atendidas
         )
-        
-        
-    if msg_fechamento_template:
-        msg_fechamento = msg_fechamento_template.format(
-            horario_atendimento=horario_atendimento
-        )
     
-    flow = client_config.get('prompt_text', False)
+    
+    flow = f"""
+
+    ##Função 
+    - Você é a Sofia 💚, do time de boleto da Mobifix, 
+    - Seu papel é ajudar o cliente a fazer uma consulta de crédito em financeiras credenciadas,
+    - Ajudamos o cliente a encontrar as melhores condições pra realizar sua compra no boleto parcelado
+    
+    ## Objetivo Principal
+    - Direcionar a conversa para encontrar as melhores condições pra realizar sua compra no boleto parcelado
+
+    ## FORMATO DE RESPOSTA OBRIGATÓRIO
+    - Não gere respostas muito longas, caso seja necessário, divida em partes, conforme exemplo abaixo.
+    - SUA RESPOSTA DEVE SER SEMPRE UM JSON VÁLIDO COM O SEGUINTE FORMATO:
+    {{
+        "fase": número_da_fase,
+        "respostas": ["resposta1", "resposta2", "..."],
+    }}
+    - Nunca avance para a fase 4, se a resposta do cliente não for: "Imagem de pix recebida com sucesso!!!"
+    - Para a Fase 4, SEMPRE use duas respostas separadas"
+        * Primeira resposta: informações do PIX formatadas
+        * Segunda resposta: apenas o CNPJ
+
+    ## Limitações e Escopo
+    - *Foco exclusivo*: Qualificação para venda no boleto
+    - *Tópicos não cobertos*:
+        1. Especificações técnicas de aparelhos
+        2. Problemas com produtos já adquiridos
+        3. Outras formas de pagamento (exceto como contraste ao boleto)
+        4. Assuntos administrativos ou reclamações
+
+    ## Diretrizes de Comportamento
+    *Tom e Estilo*
+    - Manter comunicação clara e profissional
+    - Evitar linguagem excessivamente técnica
+    - Ser transparente sobre custos e processos
+    - Demonstrar empatia nas respostas
+    
+    ## Fluxo Conversacional
+    - Seguir o fluxo conversacional definido
+    - Avance de fase *APENAS* quanto tiver a certeza que a fase atual foi concluída
+    - Caso o cliente tenha duvidas referente a fase atual, ou sobre o processo, responda a duvida e retorne ao fluxo 
+
+    ### Fase 1: *Abertura*
+    - Se apresente como Sofia, use um emoje de coração verde 💚, e explique o que você vende.
+    - Explique que irá ajudar a encontrar as melhores condições para realizar a compra no boleto partelado
+    - Deixe claro que a taxa de aprovação é alta, e muitos negativados são aprovados 
+    - Informe que o crédito pode ser concedido em até 24x no boleto
+    
+    ### Fase 2: *Validação de negativados*
+    - Informe que para começar, precisa fazer uma pergunta importante para entender o perfil do cliente
+    - Pergunte se o cliente tem o nome regularizado ou se tem alguma restrição 
+    - Se o cliente disser que está negativado, responda que tudo bem, que muitos negativados são aprovados e explique novamente que você irá ajudar a encontrar as melhores condições para realizar a compra no boleto partelado
+    
+    ### Fase 3: *Explicação do processo*
+    - Descrever análise de crédito e custo associado
+    - O custo é para cobrir a taxa da financeira
+    - Explique que o pagamento é via PIX
+    - Informe que o pagamento é de R$ 24,90
+    - Informe que o pagamento é para análise de crédito
+    - Caso o cliente tenha duvidas, exclareça elas antes de avançar para a proxima fase 
+    
+    ### Fase 4: *Instruções de pagamento*
+    - Descrever análise de crédito e custo associado
+    - Infore que após o pagamento, o cliente pode tentar aprovação 3 vezes e em financeiras diferentes
+    - Forneça APENAS chave pix para que o cliente consiga copiar em um celular de forma facil
+    - A resposta deve ser dividida em DUAS partes:
+      * Primeira parte: "Pix CNPJ\niFix Mobile LTDA\nBanco Itaú"
+      * Segunda parte: APENAS o número do CNPJ: "53645708000166"
+    
+    ### Fase 5: *Informações pós-pagamento*
+    - Tenha certeza que recebeu do cliente a mensagem: "Imagem de pix recebida com sucesso!!!", caso contrário, peça para o cliente enviar o comprovante de pagamento
+    - Não estabeleça prazos específicos para retorno
+    - Voce deve deixar *CLARO* que um vendedor especialista que irá entrar em contato com o Resultado da Analise. 
+    - Peça TODOS os seguintes dados em UMA LISTA e em ÚNICA mensagem: 
+        * NOME COMPLETO:\nNOME DA MÃE:\nCPF:\nRG:\nTELEFONE (do dono do CPF):\nDATA DE NASCIMENTO:\nE-MAIL:\nCEP:\nSITUAÇÃO EMPREGATÍCIA:\nMÉDIA DE RENDA MENSAL:
+    
+    ### Fase 6: *Encerramento*
+    - Agradeça o contato e reforce o compromisso de ajudar na compra
+    - Deseje um bom dia/tarde/noite conforme o horário
+    - Informe que a nossa equipe entrará em contato
+    - Não estabeleça prazos específicos para retorno
+
+    ## Gerenciamento de Desvios
+    - Reconhecer perguntas fora do escopo
+    - Retornar suavemente ao tópico principal
+    - Oferecer canais alternativos para questões não relacionadas
+    - Manter o foco no objetivo de qualificação
+
+    ## Transparência Obrigatória
+    - Sempre mencionar o custo de R$ 24,90 antes de solicitar pagamento
+    - Esclarecer que o valor é para análise de crédito, é por conta de um custo da financeira.
+    - Informar sobre as 2 tentativas extras em caso de negação
+    - Manter consistência nas informações sobre prazos e processos
+
+    ## Ações Proibidas
+    - Prometer aprovação garantida
+    - Não se apresente ou fale seu nome mais de uma vez. Consulte o Histórico da Conversa.
+    - Ocultar informações sobre custos
+    - Fornecer informações técnicas sobre aparelhos
+    - Vender ou conversar sobre aparelhos
+    - Processar pagamentos sem confirmação explícita do cliente
+    - Armazenar dados sensíveis do comprovante PIX
+
+    ## Fluxo de Exceção
+    - Se o cliente recusar a análise: encerrar conversa 
+    - Em caso de dúvidas frequentes: criar respostas padrão baseadas em histórico
+    - Para solicitações complexas: Explique que 
+    - Em situações de conflito: manter profissionalismo e buscar resolução
+
+    ## Métricas de Qualidade
+    Clareza na comunicação de custos
+    Taxa de conversão no fluxo
+    Satisfação do cliente com o processo
+    Redução de retrabalho por informações incompletas
+    
+    ## IMPORTANTE
+    - Sua resposta deve ser SEMPRE um JSON válido
+    - Use a fase apropriada para o momento da conversa
+    - A "resposta" deve ser natural e conversacional
+    - Nunca inclua texto fora do formato JSON especificado
+    """
     
     if not flow:
         logging.info("Não foi possivel carregar o prompt")
         return JSONResponse(content={"status": "Problemas ao tentar carregar o prompt"}, status_code=200)
     
-    qdrant_results = query_qdrant(query)
-
-    # Preparar variáveis para formatação
+    #qdrant_results = query_qdrant(query)
     format_vars = {
         'nome_do_agent': nome_do_agent,
         'nome_da_loja': nome_da_loja,
         'horario_atendimento': horario_atendimento,
         'endereco_da_loja': endereco_da_loja,
         'categorias_atendidas': categorias_atendidas,
-        'forma_pagamento_iphone': forma_pagamento_iphone,
-        'forma_pagamento_android': forma_pagamento_android,
-        'lista_iphone': lista_iphone,
-        'lista_android': lista_android,
-        'msg_abertura': msg_abertura,
-        'msg_fechamento': msg_fechamento,
         'history_str': history_str,
-        'qdrant_results': qdrant_results,
-        'query': query,
-        'nome_cliente': nome_cliente,
-        'intent': intent
+        'nome_cliente': nome_cliente
     }
     
     formatted_prompt = format_prompt(flow, format_vars)
@@ -1265,9 +1335,6 @@ def get_custom_prompt(query, history_str, intent ,nome_cliente):
     ### 🧠 Histórico da Conversa
     {history_str}
 
-    ### 📚 Base de Conhecimento
-    {qdrant_results}  
-
     ## 🧠 INSTRUÇÕES PARA O AGENTE
     {formatted_prompt}
 
@@ -1277,23 +1344,11 @@ def get_custom_prompt(query, history_str, intent ,nome_cliente):
 
 def make_answer(prompt):
     # Substituído Groq por OpenAI
-    chat = ChatOpenAI(
-        temperature=0, 
-        model="gpt-4o-mini"
-    )
-    system = SystemMessage(content=(
-        "Você é um assistente. NÃO realize buscas na web, NÃO use ferramentas externas e NÃO acesse URLs. "
-        "Responda apenas com base no contexto e no histórico fornecidos."
-    ))
+    chat = ChatOpenAI(temperature=0, model="gpt-4o-mini").with_structured_output(method="json_mode")
+    response_text = chat.invoke(prompt)
     
-    res = chat.invoke(prompt)
-    #res = chat.invoke([system, HumanMessage(content=prompt)])
-    
-    response_text = res.content
-    # Removido tratamento específico do Groq
-    response_text = response_text.strip()
-    
-    return AIMessage(content=response_text)
+    return response_text
+
 
 def detect_intent(text):
     keywords = {
@@ -1320,27 +1375,12 @@ def get_text_message_input(recipient, text):
         }
     )
 
-def send_whatsapp_message(number: str, text: str):
-    #logging.info(f'resposta do bot -> {text}')
-    url = f"https://saraevo-evolution-api.jntduz.easypanel.host/message/sendText/{cliente_evo}"
-    payload = {
-        "number": number,
-        "text": text
-    }
-    headers = {
-        "apikey": EVOLUTION_API_KEY,
-        "Content-Type": "application/json"
-    }
-    response = requests.post(url, json=payload, headers=headers)
-    #logging.info(f'response do bot -> {response}')
-    return response
-
 
 @app.post("/messages-upsert")
 async def messages_upsert(request: Request):
     data = await request.json()
     key = data['data']['key']
-    full_jid = key.get('senderPn') or key.get('remoteJid')
+    full_jid = key.get('remoteJid')
     msg_type = data['data']['messageType']
     msg_id = data['data']['key']['id']
     from_me_flag = data['data']['key']['fromMe']
@@ -1368,7 +1408,7 @@ async def messages_upsert(request: Request):
     else:
         sender_type = 'user'
     
-    if msg_type not in ['audioMessage','imageMessage']:
+    if msg_type not in ['audioMessage','imageMessage','documentMessage']:
         save_message_to_history(full_jid, sender_type, data['data']['message']['conversation'])
     
     if not bot_active_per_chat[full_jid]:
@@ -1386,7 +1426,8 @@ async def messages_upsert(request: Request):
 
     valid_numbers = [num for num in AUTHORIZED_NUMBERS if num.strip()]
 
-    logging.info(f'NUMEROS -> {valid_numbers}')
+    #logging.info(f'NUMEROS -> {valid_numbers}')
+    #logging.info(f"MSG RECEIVED: {data}")
 
     if valid_numbers:
         if numero not in valid_numbers:
@@ -1401,6 +1442,19 @@ async def messages_upsert(request: Request):
         sender_number = full_jid.split('@')[0]
     else:
         sender_number = full_jid
+
+    try:
+        response = supabase.table("black_list") \
+            .select("phone") \
+            .eq("client_id", CLIENT_ID) \
+            .eq("phone", sender_number) \
+            .limit(1) \
+            .execute()
+        if response.data:
+            logging.info(f"Número {sender_number} está na blacklist, ignorando mensagem.")
+            return JSONResponse(content={"status": "number in blacklist"}, status_code=200)
+    except Exception as e:
+        logging.error(f"Erro ao consultar blacklist: {str(e)}")
     
     #valida se o lead foi qualificado recentemente
     if is_lead_qualified_recently(full_jid, CLIENT_ID) and verificar_lead_qualificado is True:
@@ -1413,10 +1467,10 @@ async def messages_upsert(request: Request):
     logging.info(f'STATUS ->>>>>>> {bot_status}')
 
     # Extrair a mensagem do usuário
-    if msg_type == 'audioMessage' and from_me_flag is False:
-        if no_horario_inatividade():
-            logger.info("Áudio recebido no horário de inatividade")
-            return JSONResponse(content={"status": "inactive_time"}, status_code=200)
+    if msg_type == 'audioMessage':
+        #if no_horario_inatividade():
+        #    logger.info("Áudio recebido no horário de inatividade")
+        #    return JSONResponse(content={"status": "inactive_time"}, status_code=200)
         
         # Processamento de áudio (mantido igual)
         message_data = data['data']['message']
@@ -1446,19 +1500,29 @@ async def messages_upsert(request: Request):
             logger.warning("⚠️ Nenhum áudio disponível para transcrição.")
             send_whatsapp_message(full_jid, "Desculpe, estou tendo dificuldades com este audio. Se possivel envie sua mensagem em texto.")
             return JSONResponse(content={"status": "number ignored"}, status_code=200)
-    else:
-        if msg_type == 'audioMessage' and from_me_flag is True:
-            return JSONResponse(content={"status": "Msg de audio enviada pela loja"}, status_code=200)
-        else:        
-            message = data['data']['message']['conversation']   
+    elif msg_type in ['imageMessage','documentMessage']:
+        message = data['data']['message']['base64']
+        message = 'Imagem de pix recebida com sucesso!!!'
+    else:        
+        message = data['data']['message']['conversation']   
 
     name = data['data']['pushName']
 
     # Verificar comandos #off/#on primeiro (sempre funcionam)
-    if any(word in message.strip().lower() for word in ["#off", "off"]):
+    if message.strip().lower() in ["#off", "off"]:
         deletar_mensagem(msg_id, full_jid, from_me_flag)
         with bot_state_lock:
             bot_active_per_chat[full_jid] = False
+
+        # Adicionar número à blacklist no Supabase
+        try:
+            supabase.table("black_list").upsert({
+                "client_id": CLIENT_ID,
+                "phone": sender_number
+            }).execute()
+            logging.info(f"Número {sender_number} adicionado à blacklist.")
+        except Exception as e:
+            logging.error(f"Erro ao adicionar número à blacklist: {str(e)}")
         
         return JSONResponse(content={"status": f"maintenance off for {sender_number}"}, status_code=200)
 
@@ -1468,24 +1532,24 @@ async def messages_upsert(request: Request):
             bot_active_per_chat[full_jid] = True
         
         return JSONResponse(content={"status": f"maintenance on for {sender_number}"}, status_code=200)
-
+    
     if from_me_flag:
         logging.info("Mensagem enviada pelo bot, ignorando...")
         return JSONResponse(content={"status": "message from me ignored"}, status_code=200)
-    
+
     #Verificar se estamos no horário de inatividade
-    if no_horario_inatividade():
-        logger.info(f"Mensagem recebida no horário de inatividade: {message}")
-        # Não processar a mensagem, apenas registrar no log
-        return JSONResponse(content={"status": "inactive_time"}, status_code=200)
+    #if no_horario_inatividade():
+    #    logger.info(f"Mensagem recebida no horário de inatividade: {message}")
+    #    # Não processar a mensagem, apenas registrar no log
+    #    return JSONResponse(content={"status": "inactive_time"}, status_code=200)
 
     # Se chegou aqui, está fora do horário de inatividade, processar normalmente
-    if msg_type == 'imageMessage' and bot_status:
-        send_whatsapp_message(full_jid, "Desculpe, não consigo abrir imagens. Por favor, envie a mensagem em texto.")
-        return JSONResponse(content={"status": "image ignored"}, status_code=200)
-    elif msg_type == 'imageMessage' and not bot_status:
-        logging.info(f'msg ignorada, imagem detectada e bot está off')
-        return JSONResponse(content={"status": "image ignored"}, status_code=200)
+    #if msg_type == 'imageMessage' and bot_status:
+    #    send_whatsapp_message(full_jid, "Desculpe, não consigo abrir imagens. Por favor, envie a mensagem em texto.")
+    #    return JSONResponse(content={"status": "image ignored"}, status_code=200)
+    #elif msg_type == 'imageMessage' and not bot_status:
+    #    logging.info(f'msg ignorada, imagem detectada e bot está off')
+    #    return JSONResponse(content={"status": "image ignored"}, status_code=200)
 
     # Processamento normal das mensagens
     if not bot_active_per_chat[full_jid]:
