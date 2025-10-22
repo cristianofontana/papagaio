@@ -10,15 +10,10 @@ import uuid
 
 import pandas as pd
 from langchain_community.document_loaders import DataFrameLoader
-from langchain.vectorstores import Qdrant
-from langchain.embeddings.openai import OpenAIEmbeddings
+from langchain_openai import OpenAIEmbeddings
 import qdrant_client 
 import os 
-from langchain.schema import (
-    SystemMessage
-    ,HumanMessage
-    ,AIMessage
-)
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 # Substituído Groq por OpenAI
 from langchain_openai import ChatOpenAI
 from dotenv import load_dotenv
@@ -46,7 +41,6 @@ from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives import hashes
 import tempfile
 import openai
-
 
 load_dotenv()
 
@@ -662,6 +656,9 @@ def send_reactivation_message():
     while True:
         try:
             now = datetime.now(pytz.utc)
+            local_now = now.astimezone(pytz.timezone("America/Sao_Paulo"))
+            if local_now.hour < 6 or local_now.hour >= 22:
+                continue
             # Add client_id filter to the query
             result = supabase.table("conversation_states") \
                 .select("*") \
@@ -725,7 +722,7 @@ def send_reactivation_message():
         except Exception as e:
             logger.error(f"Erro no envio de reativação: {str(e)}")
         
-        time.sleep(60)
+        time.sleep(300)
 
 def save_message_to_history(phone_number: str, sender: str, message: str, conversation_id: str = None):
     """
@@ -908,9 +905,9 @@ def load_user_stage_from_db(phone: str) -> int:
         return 0
 
 REACTIVATION_SEQUENCE = [
-    (1, "reengajamento"),   # 3 horas
-    (2, "oferta_limitada"),  # 6 horas
-    (3, "fechamento_urgencia"),  # 24 horas
+    (180, "reengajamento"),   # 3 horas
+    (360, "oferta_limitada"),  # 6 horas
+    (1440, "fechamento_urgencia"),  # 24 horas
     (4, "stop_reativation")  # never more 
 ]
 
