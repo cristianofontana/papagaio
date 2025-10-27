@@ -10,15 +10,10 @@ import uuid
 
 import pandas as pd
 from langchain_community.document_loaders import DataFrameLoader
-from langchain.vectorstores import Qdrant
-from langchain.embeddings.openai import OpenAIEmbeddings
+from langchain_openai import OpenAIEmbeddings
 import qdrant_client 
 import os 
-from langchain.schema import (
-    SystemMessage
-    ,HumanMessage
-    ,AIMessage
-)
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 # Substituído Groq por OpenAI
 from langchain_openai import ChatOpenAI
 from dotenv import load_dotenv
@@ -139,9 +134,9 @@ def load_client_config(client_id: str) -> dict:
         return {}
 
 # Carregar configurações do Supabase
-CLIENT_ID = 'five_store'  # ID do cliente no Supabase
+CLIENT_ID = 'lets_go'  # ID do cliente no Supabase
 verificar_lead_qualificado = True  # Ativar verificação de lead qualificado
-HISTORY_EXPIRATION_MINUTES = 180 # 3 horas de buffer das mensagens
+HISTORY_EXPIRATION_MINUTES = 300 # 3 horas de buffer das mensagens
 
 def get_client_config() -> dict:
     client_config = load_client_config(CLIENT_ID)
@@ -158,7 +153,7 @@ lugares_que_faz_entrega = client_config.get('lugares_que_faz_entrega', '')
 forma_pagamento_iphone = client_config.get('forma_pagamento_iphone', 'à vista e cartão em até 21X')
 forma_pagamento_android = client_config.get('forma_pagamento_android', 'à vista, no cartão em até 21X ou boleto')
 COLLECTION_NAME = client_config.get('collection_name', 'Não Informado')
-cliente_evo = 'Papagaio_dev'  #COLLECTION_NAME
+cliente_evo = 'Lets Go'  #COLLECTION_NAME
 AUTHORIZED_NUMBERS = client_config.get('authorized_numbers', [''])
 
 id_grupo_cliente =  client_config.get('group_id', 'Não Informado')#'120363420079107628@g.us' #120363420079107628@g.us id grupo papagaio 
@@ -383,7 +378,15 @@ async def send_message_webhook(request: Request):
     full_jid = data.get("chat_lid")  # Ex.:
     name = data.get("chat_name")
 
-    if mensagem.strip().lower() == "#off":
+    if not numero or not isinstance(mensagem, str):
+        return JSONResponse(
+            content={"error": "numero e mensagem são obrigatórios"},
+            status_code=400,
+        )
+    mensagem = mensagem.strip()
+    mensagem = mensagem.lower()
+
+    if mensagem == "#off":
         #deletar_mensagem(msg_id, full_jid, from_me_flag)
         with bot_state_lock:
             bot_active_per_chat[full_jid] = False
@@ -394,7 +397,7 @@ async def send_message_webhook(request: Request):
         message_buffer.clear_buffer(full_jid)  # Limpa o buffer para este usuário
         return JSONResponse(content={"status": f"maintenance OFF for {numero}"}, status_code=200)
 
-    elif mensagem.strip().lower() == "#on":
+    elif mensagem == "#on":
         #deletar_mensagem(msg_id, full_jid, from_me_flag)
         with bot_state_lock:
             bot_active_per_chat[full_jid] = True 
@@ -1401,6 +1404,19 @@ async def messages_upsert(request: Request):
         sender_number = full_jid.split('@')[0]
     else:
         sender_number = full_jid
+
+    try:
+        response = supabase.table("black_list") \
+            .select("phone") \
+            .eq("client_id", CLIENT_ID) \
+            .eq("phone", sender_number) \
+            .limit(1) \
+            .execute()
+        if response.data:
+            logging.info(f"Número {sender_number} está na blacklist, ignorando mensagem.")
+            return JSONResponse(content={"status": "number in blacklist"}, status_code=200)
+    except Exception as e:
+        logging.error(f"Erro ao consultar blacklist: {str(e)}")
     
     #valida se o lead foi qualificado recentemente
     if is_lead_qualified_recently(full_jid, CLIENT_ID) and verificar_lead_qualificado is True:
@@ -1414,9 +1430,9 @@ async def messages_upsert(request: Request):
 
     # Extrair a mensagem do usuário
     if msg_type == 'audioMessage' and from_me_flag is False:
-        if no_horario_inatividade():
-            logger.info("Áudio recebido no horário de inatividade")
-            return JSONResponse(content={"status": "inactive_time"}, status_code=200)
+        #if no_horario_inatividade():
+        #    logger.info("Áudio recebido no horário de inatividade")
+        #    return JSONResponse(content={"status": "inactive_time"}, status_code=200)
         
         # Processamento de áudio (mantido igual)
         message_data = data['data']['message']
@@ -1461,6 +1477,17 @@ async def messages_upsert(request: Request):
             bot_active_per_chat[full_jid] = False
         
         return JSONResponse(content={"status": f"maintenance off for {sender_number}"}, status_code=200)
+    
+    elif any(word in message.strip().lower() for word in ["#stop", "stop", "STOP","Stop","#Stop"]):
+        try:
+            supabase.table("black_list").upsert({
+                "client_id": CLIENT_ID,
+                "phone": sender_number
+            }).execute()
+            deletar_mensagem(msg_id, full_jid, from_me_flag)
+            logging.info(f"Número {sender_number} adicionado à blacklist.")
+        except Exception as e:
+            logging.error(f"Erro ao adicionar número à blacklist: {str(e)}")
 
     elif message.strip().lower() == "#on":
         deletar_mensagem(msg_id, full_jid, from_me_flag)
@@ -1474,10 +1501,10 @@ async def messages_upsert(request: Request):
         return JSONResponse(content={"status": "message from me ignored"}, status_code=200)
     
     #Verificar se estamos no horário de inatividade
-    if no_horario_inatividade():
-        logger.info(f"Mensagem recebida no horário de inatividade: {message}")
-        # Não processar a mensagem, apenas registrar no log
-        return JSONResponse(content={"status": "inactive_time"}, status_code=200)
+    #if no_horario_inatividade():
+    #    logger.info(f"Mensagem recebida no horário de inatividade: {message}")
+    #    # Não processar a mensagem, apenas registrar no log
+    #    return JSONResponse(content={"status": "inactive_time"}, status_code=200)
 
     # Se chegou aqui, está fora do horário de inatividade, processar normalmente
     if msg_type == 'imageMessage' and bot_status:
