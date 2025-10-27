@@ -724,6 +724,12 @@ def send_reactivation_message():
         
         time.sleep(300)
 
+@app.on_event("startup")
+def start_background_threads():
+    threading.Thread(target=cleanup_expired_histories, daemon=True).start()
+    #threading.Thread(target=send_reactivation_message, daemon=True).start()
+
+
 def save_message_to_history(phone_number: str, sender: str, message: str, conversation_id: str = None):
     """
     Salva uma mensagem no histórico do Supabase
@@ -1687,6 +1693,8 @@ async def messages_upsert(request: Request):
     msg_id = data['data']['key']['id']
     from_me_flag = data['data']['key']['fromMe']
     
+    logging.info(f"MSG RECEBIDA: {data}")
+    
     ## Insere Dados CRM 
     #foto_url = obter_foto_perfil(EVOLUTION_SERVER_URL, cliente_evo, EVOLUTION_API_KEY, full_jid)
     #payload_wainbound = montar_payload_wa_inbound(data,foto_url)
@@ -1844,12 +1852,5 @@ async def messages_upsert(request: Request):
     return JSONResponse(content={"status": "received"}, status_code=200)
 
 if __name__ == "__main__":
-    cleanup_thread = threading.Thread(target=cleanup_expired_histories, daemon=True)
-    cleanup_thread.start()
-
-    # Iniciar thread de reativação
-    reactivation_thread = threading.Thread(target=send_reactivation_message, daemon=True)
-    reactivation_thread.start()
-
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8080)
