@@ -152,7 +152,7 @@ lugares_que_faz_entrega = client_config.get('lugares_que_faz_entrega', '')
 forma_pagamento_iphone = client_config.get('forma_pagamento_iphone', 'à vista e cartão em até 21X')
 forma_pagamento_android = client_config.get('forma_pagamento_android', 'à vista, no cartão em até 21X ou boleto')
 COLLECTION_NAME = client_config.get('collection_name', 'Não Informado')
-cliente_evo = 'Five'  #COLLECTION_NAME
+cliente_evo = 'Papagaio_dev'  #COLLECTION_NAME
 AUTHORIZED_NUMBERS = client_config.get('authorized_numbers', [''])
 
 id_grupo_cliente =  client_config.get('group_id', 'Não Informado')#'120363420079107628@g.us' #120363420079107628@g.us id grupo papagaio 
@@ -678,9 +678,9 @@ def send_reactivation_message():
                 if not should_send_reactivation_llm(phone, conversation_history):
                     logger.info(f"Pulando reativação para {phone} - LLM determinou que não é lead de compra")
                     # Marcar como qualificado=false para não reprocessar
-                    supabase.table("conversation_states").update({
-                        "qualified": True  # Marca como "não qualificado para reativação"
-                    }).eq("phone", phone).eq("client_id", CLIENT_ID).execute()
+                    supabase.table("conversation_states").delete()\
+                        .eq("phone", phone).eq("client_id", CLIENT_ID).execute()
+                    logging.info(f"DELETANDO DADOS PARA STAGE 4")
                     continue
                 
                 if step < len(REACTIVATION_SEQUENCE)-1:
@@ -705,17 +705,18 @@ def send_reactivation_message():
                     elif new_step >= 3:
                         # Último lembrete enviado, deletar da tabela
                         #supabase.table("conversation_states").delete().eq("phone", phone).eq("client_id", CLIENT_ID).execute()
-                        supabase.table("conversation_states") \
-                        .update({"stage": 4}) \
-                        .eq("phone", phone) \
-                        .eq("client_id", CLIENT_ID) \
-                        .execute()
+                        #supabase.table("conversation_states") \
+                        #.update({"stage": 4}) \
+                        #.eq("phone", phone) \
+                        #.eq("client_id", CLIENT_ID) \
+                        #.execute()
+                        
+                        supabase.table("conversation_states").delete()\
+                        .eq("phone", phone).eq("client_id", CLIENT_ID).execute()
+                        
                     else:
-                        supabase.table("conversation_states") \
-                        .update({"stage": 4}) \
-                        .eq("phone", phone) \
-                        .eq("client_id", CLIENT_ID) \
-                        .execute()
+                        supabase.table("conversation_states").delete()\
+                        .eq("phone", phone).eq("client_id", CLIENT_ID).execute()
                         # Add client_id filter to delete
                         #supabase.table("conversation_states").delete().eq("phone", phone).eq("client_id", CLIENT_ID).execute()
         
@@ -727,7 +728,7 @@ def send_reactivation_message():
 @app.on_event("startup")
 def start_background_threads():
     threading.Thread(target=cleanup_expired_histories, daemon=True).start()
-    #threading.Thread(target=send_reactivation_message, daemon=True).start()
+    threading.Thread(target=send_reactivation_message, daemon=True).start()
 
 
 def save_message_to_history(phone_number: str, sender: str, message: str, conversation_id: str = None):
@@ -794,16 +795,18 @@ def load_conversation_history_from_db(phone_number: str) -> List[Union[HumanMess
 
 def load_full_conversation_history(phone_number: str, nome_da_loja) -> List[dict]:
     """
-    Carrega todo o histórico de conversa do banco de dados para um número específico
+    Carrega as últimas 10 mensagens do histórico de conversa para um número específico
     """
     try:
         response = supabase.table("chat_history") \
             .select("*") \
             .eq("phone_number", phone_number) \
             .eq("loja", nome_da_loja) \
-            .order("created_at", desc=False) \
+            .order("created_at", desc=True) \
+            .limit(10) \
             .execute()
-        return response.data
+        # Retorna em ordem cronológica (mais antigas primeiro)
+        return list(reversed(response.data))
     except Exception as e:
         logger.error(f"Erro ao carregar histórico completo do banco: {str(e)}")
         return []
@@ -913,7 +916,7 @@ def load_user_stage_from_db(phone: str) -> int:
 REACTIVATION_SEQUENCE = [
     (180, "reengajamento"),   # 3 horas
     (360, "oferta_limitada"),  # 6 horas
-    (1440, "fechamento_urgencia"),  # 24 horas
+    (1400, "fechamento_urgencia"),  # 24 horas
     (4, "stop_reativation")  # never more 
 ]
 
@@ -961,10 +964,9 @@ def should_send_reactivation_llm(phone_number: str, conversation_history: list) 
         
         # Chamar o LLM para análise
         chat = ChatOpenAI(temperature=0, model="gpt-4o-mini")
+
         response = chat.invoke(prompt)
         decision = response.content.strip().lower()
-        
-        logger.info(f"LLM decision for {phone_number}: {decision}")
         
         return decision == "true"
         
@@ -975,7 +977,9 @@ def should_send_reactivation_llm(phone_number: str, conversation_history: list) 
 def get_stage_instructions(stage_type: str) -> str:
     if stage_type == "reengajamento":
         return """
-        - Voltar à conversa relembrando o interesse inicial e adicionando um novo argumento de valor.
+        - Use o nome do cliente sempre que possivel
+        - Voltar à conversa relembrando o interesse inicial e adicionando um novo argumento de valor. exemplo: "Oi [Nome do Contato], lembrei que você estava interessado em [Produto], ..."
+        - Use este emoji: 👀👀
         - Usar gatilhos como: Disponibilidade, Garantia, Promoção Relâmpago.
         - Nunca fale sobre preços ou valores
         """
@@ -1239,14 +1243,20 @@ def process_user_message(sender_number: str, message: str, name: str):
     if response_content.strip() != "#no-answer":
         send_whatsapp_message(sender_number, response_content)
         current_stage = conversation_history[sender_number]['stage']
-        save_conversation_state(
-            sender_number=sender_number,
-            last_user_message=message,
-            last_bot_message=response_content,
-            stage=current_stage,
-            last_activity=datetime.now(pytz.utc),
-            qualified_status=qualified_status
-        )
+        
+        if current_stage == 4: 
+            supabase.table("conversation_states").delete()\
+                .eq("phone", sender_number).eq("client_id", CLIENT_ID).execute()
+            logging.info(f"Dados deletados para: {sender_number}")
+        else:
+            save_conversation_state(
+                sender_number=sender_number,
+                last_user_message=message,
+                last_bot_message=response_content,
+                stage=current_stage,
+                last_activity=datetime.now(pytz.utc),
+                qualified_status=qualified_status
+            )
         
         #insere resposta bot no crm
         #json_responde_bot = make_json_response_bot(chatName=name, chatLid=sender_number, fromMe=True, instanceId='', messageId='', status='SENT', senderName='CRM', messageType='text', messageContent=response_content, phone=numero)
@@ -1811,6 +1821,13 @@ async def messages_upsert(request: Request):
         with bot_state_lock:
             bot_active_per_chat[full_jid] = False
         
+
+        logging.info(f'deletando dados de: {full_jid}')
+        response = supabase.table("conversation_states").delete()\
+            .eq("phone", full_jid).eq("client_id", CLIENT_ID).execute()
+        
+        logging.info(f"response do delete: {response}")
+
         return JSONResponse(content={"status": f"maintenance off for {sender_number}"}, status_code=200)
 
     elif message.strip().lower() == "#on":
