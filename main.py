@@ -47,7 +47,7 @@ load_dotenv()
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 EVOLUTION_API_KEY = os.getenv("EVO_API_KEY")
-EVOLUTION_SERVER_URL = 'https://saraevo-evolution-api.jntduz.easypanel.host/'  # Ex.: https://meu-servidor-evolution.com
+EVOLUTION_SERVER_URL = 'https://medicos-evolution-api.gr9uf9.easypanel.host/'  # Ex.: https://meu-servidor-evolution.com
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -133,7 +133,7 @@ def load_client_config(client_id: str) -> dict:
         return {}
 
 # Carregar configurações do Supabase
-CLIENT_ID = 'five_store'  # ID do cliente no Supabase
+CLIENT_ID = 'vpm_iphones'  # ID do cliente no Supabase
 verificar_lead_qualificado = True  # Ativar verificação de lead qualificado
 HISTORY_EXPIRATION_MINUTES = 180 # 3 horas de buffer das mensagens
 
@@ -338,8 +338,8 @@ def deletar_mensagem(message_id: str, remote_jid: str, from_me: bool):
     logger.info(f"🗑️ Deletando mensagem {message_id} de {remote_jid} (fromMe={from_me})")
 
     url_evo = f'{EVOLUTION_SERVER_URL}chat/deleteMessageForEveryone/{cliente_evo}'
-    #https://saraevo-evolution-api.jntduz.easypanel.host/chat/deleteMessageForEveryone/ReconvertAI
-    #https://saraevo-evolution-api.jntduz.easypanel.host/chat/deleteMessageForEveryone/papagaio
+    #https://medicos-evolution-api.gr9uf9.easypanel.host/chat/deleteMessageForEveryone/ReconvertAI
+    #https://medicos-evolution-api.gr9uf9.easypanel.host/chat/deleteMessageForEveryone/papagaio
     logging.info(f'URL_EVO -> {url_evo}')
 
     resp = requests.delete(url_evo, headers=headers, json=payload)
@@ -397,6 +397,7 @@ async def send_message_webhook(request: Request):
         #inserir_dados_crm(json_responde_bot)
         
         return JSONResponse(content={"status": f"maintenance ON for {numero}"}, status_code=200)
+
 
     if not numero or not mensagem:
         return JSONResponse(content={"error": "numero e mensagem são obrigatórios"}, status_code=400)
@@ -728,7 +729,7 @@ def send_reactivation_message():
 @app.on_event("startup")
 def start_background_threads():
     threading.Thread(target=cleanup_expired_histories, daemon=True).start()
-    threading.Thread(target=send_reactivation_message, daemon=True).start()
+    ###threading.Thread(target=send_reactivation_message, daemon=True).start()
 
 
 def save_message_to_history(phone_number: str, sender: str, message: str, conversation_id: str = None):
@@ -1668,6 +1669,7 @@ def detect_intent(text):
 
 # Função para montar a mensagem de texto
 def get_text_message_input(recipient, text):
+    
     return json.dumps(
         {
             "messaging_product": "whatsapp",
@@ -1680,7 +1682,7 @@ def get_text_message_input(recipient, text):
 
 def send_whatsapp_message(number: str, text: str):
     #logging.info(f'resposta do bot -> {text}')
-    url = f"https://saraevo-evolution-api.jntduz.easypanel.host/message/sendText/{cliente_evo}"
+    url = f"https://medicos-evolution-api.gr9uf9.easypanel.host/message/sendText/{cliente_evo}"
     payload = {
         "number": number,
         "text": text
@@ -1762,6 +1764,20 @@ async def messages_upsert(request: Request):
         sender_number = full_jid.split('@')[0]
     else:
         sender_number = full_jid
+
+    try:
+        response = supabase.table("black_list") \
+            .select("phone") \
+            .eq("client_id", CLIENT_ID) \
+            .eq("phone", sender_number) \
+            .limit(1) \
+            .execute()
+        if response.data:
+            logging.info(f"Número {sender_number} está na blacklist, ignorando mensagem.")
+            return JSONResponse(content={"status": "number in blacklist"}, status_code=200)
+    except Exception as e:
+        logging.error(f"Erro ao consultar blacklist: {str(e)}")
+    
     
     #valida se o lead foi qualificado recentemente
     if is_lead_qualified_recently(full_jid, CLIENT_ID) and verificar_lead_qualificado is True:
@@ -1836,6 +1852,17 @@ async def messages_upsert(request: Request):
             bot_active_per_chat[full_jid] = True
         
         return JSONResponse(content={"status": f"maintenance on for {sender_number}"}, status_code=200)
+
+    elif any(word in message.strip().lower() for word in ["#stop", "stop", "STOP","Stop","#Stop"]):
+        try:
+            supabase.table("black_list").upsert({
+                "client_id": CLIENT_ID,
+                "phone": sender_number
+            }).execute()
+            deletar_mensagem(msg_id, full_jid, from_me_flag)
+            logging.info(f"Número {sender_number} adicionado à blacklist.")
+        except Exception as e:
+            logging.error(f"Erro ao adicionar número à blacklist: {str(e)}")
     
     if from_me_flag:
         logging.info("Mensagem enviada pelo bot, ignorando...")

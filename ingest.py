@@ -7,7 +7,7 @@ from langchain_openai import OpenAIEmbeddings
 
 load_dotenv()
 
-collection_name = 'iclub_belem'
+collection_name = 'vpm_iphones'
 
 def create_documents(df):
     """Transforma o CSV em documentos para embedding"""
