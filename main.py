@@ -48,7 +48,7 @@ load_dotenv()
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 EVOLUTION_API_KEY = os.getenv("EVO_API_KEY")
-EVOLUTION_SERVER_URL = 'https://saraevo-evolution-api.jntduz.easypanel.host/'  # Ex.: https://meu-servidor-evolution.com
+EVOLUTION_SERVER_URL = 'https://medicos-evolution-api.gr9uf9.easypanel.host/'  # Ex.: https://meu-servidor-evolution.com
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -153,7 +153,7 @@ lugares_que_faz_entrega = client_config.get('lugares_que_faz_entrega', '')
 forma_pagamento_iphone = client_config.get('forma_pagamento_iphone', 'à vista e cartão em até 21X')
 forma_pagamento_android = client_config.get('forma_pagamento_android', 'à vista, no cartão em até 21X ou boleto')
 COLLECTION_NAME = client_config.get('collection_name', 'Não Informado')
-cliente_evo = 'lets go'  #COLLECTION_NAME
+cliente_evo = 'Lets Go'  #COLLECTION_NAME
 AUTHORIZED_NUMBERS = client_config.get('authorized_numbers', [''])
 
 id_grupo_cliente =  client_config.get('group_id', 'Não Informado')#'120363420079107628@g.us' #120363420079107628@g.us id grupo papagaio 
@@ -232,7 +232,7 @@ qdrant_client = QdrantClient(
 )
 
 
-def query_qdrant(query: str, k: int = 10) -> list:
+def query_qdrant(query: str, k: int = 20) -> list:
     """Consulta o Qdrant e retorna os documentos mais relevantes"""
     logging.info(f"Consultando Qdrant com a query: {query}")
 
@@ -339,8 +339,8 @@ def deletar_mensagem(message_id: str, remote_jid: str, from_me: bool):
     logger.info(f"🗑️ Deletando mensagem {message_id} de {remote_jid} (fromMe={from_me})")
 
     url_evo = f'{EVOLUTION_SERVER_URL}chat/deleteMessageForEveryone/{cliente_evo}'
-    #https://saraevo-evolution-api.jntduz.easypanel.host/chat/deleteMessageForEveryone/ReconvertAI
-    #https://saraevo-evolution-api.jntduz.easypanel.host/chat/deleteMessageForEveryone/papagaio
+    #https://medicos-evolution-api.gr9uf9.easypanel.host/chat/deleteMessageForEveryone/ReconvertAI
+    #https://medicos-evolution-api.gr9uf9.easypanel.host/chat/deleteMessageForEveryone/papagaio
     logging.info(f'URL_EVO -> {url_evo}')
 
     resp = requests.delete(url_evo, headers=headers, json=payload)
@@ -771,6 +771,7 @@ def load_conversation_history_from_db(phone_number: str) -> List[Union[HumanMess
         response = supabase.table("chat_history") \
             .select("*") \
             .eq("phone_number", phone_number) \
+            .eq("loja", nome_da_loja) \
             .gte("created_at", expiry_time.isoformat()) \
             .order("created_at", desc=False) \
             .execute()
@@ -1325,7 +1326,7 @@ def get_text_message_input(recipient, text):
 
 def send_whatsapp_message(number: str, text: str):
     #logging.info(f'resposta do bot -> {text}')
-    url = f"https://saraevo-evolution-api.jntduz.easypanel.host/message/sendText/{cliente_evo}"
+    url = f"https://medicos-evolution-api.gr9uf9.easypanel.host/message/sendText/{cliente_evo}"
     payload = {
         "number": number,
         "text": text
@@ -1335,7 +1336,7 @@ def send_whatsapp_message(number: str, text: str):
         "Content-Type": "application/json"
     }
     response = requests.post(url, json=payload, headers=headers)
-    #logging.info(f'response do bot -> {response}')
+    logging.info(f'response do bot -> {response}')
     return response
 
 
@@ -1343,7 +1344,7 @@ def send_whatsapp_message(number: str, text: str):
 async def messages_upsert(request: Request):
     data = await request.json()
     key = data['data']['key']
-    full_jid = key.get('senderPn') or key.get('remoteJid')
+    full_jid = key.get('remoteJidAlt') if key.get('addressingMode') == 'lid' else key.get('remoteJid')
     msg_type = data['data']['messageType']
     msg_id = data['data']['key']['id']
     from_me_flag = data['data']['key']['fromMe']
