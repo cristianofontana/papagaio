@@ -48,7 +48,7 @@ load_dotenv()
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 EVOLUTION_API_KEY = os.getenv("EVO_API_KEY")
-EVOLUTION_SERVER_URL = 'https://saraevo-evolution-api.jntduz.easypanel.host/'  # Ex.: https://meu-servidor-evolution.com
+EVOLUTION_SERVER_URL = 'https://medicos-evolution-api.gr9uf9.easypanel.host/'  # Ex.: https://meu-servidor-evolution.com
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -134,7 +134,7 @@ def load_client_config(client_id: str) -> dict:
         return {}
 
 # Carregar configurações do Supabase
-CLIENT_ID = 'lets_go'  # ID do cliente no Supabase
+CLIENT_ID = 'vpm_iphones'  # ID do cliente no Supabase
 verificar_lead_qualificado = True  # Ativar verificação de lead qualificado
 HISTORY_EXPIRATION_MINUTES = 300 # 3 horas de buffer das mensagens
 
@@ -153,7 +153,7 @@ lugares_que_faz_entrega = client_config.get('lugares_que_faz_entrega', '')
 forma_pagamento_iphone = client_config.get('forma_pagamento_iphone', 'à vista e cartão em até 21X')
 forma_pagamento_android = client_config.get('forma_pagamento_android', 'à vista, no cartão em até 21X ou boleto')
 COLLECTION_NAME = client_config.get('collection_name', 'Não Informado')
-cliente_evo = 'lets go'  #COLLECTION_NAME
+cliente_evo = 'Papagaio_dev'  #COLLECTION_NAME
 AUTHORIZED_NUMBERS = client_config.get('authorized_numbers', [''])
 
 id_grupo_cliente =  client_config.get('group_id', 'Não Informado')#'120363420079107628@g.us' #120363420079107628@g.us id grupo papagaio 
@@ -232,7 +232,7 @@ qdrant_client = QdrantClient(
 )
 
 
-def query_qdrant(query: str, k: int = 10) -> list:
+def query_qdrant(query: str, k: int = 20) -> list:
     """Consulta o Qdrant e retorna os documentos mais relevantes"""
     logging.info(f"Consultando Qdrant com a query: {query}")
 
@@ -339,8 +339,8 @@ def deletar_mensagem(message_id: str, remote_jid: str, from_me: bool):
     logger.info(f"🗑️ Deletando mensagem {message_id} de {remote_jid} (fromMe={from_me})")
 
     url_evo = f'{EVOLUTION_SERVER_URL}chat/deleteMessageForEveryone/{cliente_evo}'
-    #https://saraevo-evolution-api.jntduz.easypanel.host/chat/deleteMessageForEveryone/ReconvertAI
-    #https://saraevo-evolution-api.jntduz.easypanel.host/chat/deleteMessageForEveryone/papagaio
+    #https://medicos-evolution-api.gr9uf9.easypanel.host/chat/deleteMessageForEveryone/ReconvertAI
+    #https://medicos-evolution-api.gr9uf9.easypanel.host/chat/deleteMessageForEveryone/papagaio
     logging.info(f'URL_EVO -> {url_evo}')
 
     resp = requests.delete(url_evo, headers=headers, json=payload)
@@ -813,37 +813,18 @@ def cleanup_expired_histories():
 message_buffer = MessageBuffer(timeout=10)
 
 def process_user_message(sender_number: str, message: str, name: str):
-
-    # Gerar ID único para a conversa se for uma nova
+    response_content = ""  # <- Inicializa aqui
     if sender_number not in conversation_history:
         conversation_id = str(uuid.uuid4())
-        # Carregar histórico do banco de dados se disponível
-        history_from_db = load_conversation_history_from_db(sender_number)
-        if history_from_db:
-            logging.info(f"Histórico carregado do DB para {sender_number}, mensagens: {len(history_from_db)}")
-            conversation_history[sender_number] = {
-                'messages': history_from_db,
-                'conversation_id': conversation_id,
-                'stage': 0,
-                'intent': detect_intent(message),
-                'bant': {'budget': None, 'authority': None, 'need': None, 'timing': None},
-                'last_activity': time.time()
-            }
     else:
         conversation_id = conversation_history[sender_number].get('conversation_id', str(uuid.uuid4()))
     
-    #(sender_number, 'user', message, conversation_id)
-    
-    # Se nenhuma skill aplicável, continua com o fluxo normal
-    current_intent = detect_intent(message)
-    
-    # Se não existir no conversation_history, inicializar vazio
+    # Inicializa ou atualiza o histórico da conversa
     if sender_number not in conversation_history:
         conversation_history[sender_number] = {
             'messages': [],
-            'conversation_id': conversation_id,
             'stage': 0,
-            'intent': detect_intent(message),
+            'intent': None,
             'bant': {'budget': None, 'authority': None, 'need': None, 'timing': None},
             'last_activity': time.time()
         }
@@ -853,91 +834,42 @@ def process_user_message(sender_number: str, message: str, name: str):
     # Adiciona a mensagem do usuário ao histórico
     conversation_history[sender_number]['messages'].append(HumanMessage(content=message))
     
-    logging.info(f'HISTORICO DE MENSAGENS: {conversation_history}')
-    
     history = conversation_history[sender_number]['messages'][-20:]
     history_str = "\n".join([f"{msg.type}: {msg.content}" for msg in history])
     
-    prompt = get_custom_prompt(message, history_str, current_intent, name)
-    response = make_answer([SystemMessage(content=prompt)] + history)
+    prompt = get_custom_prompt(message, history_str, 1, name)
+    response_dict = make_answer([SystemMessage(content=prompt)] + history)
+    logging.info(f"RESPOSTA DO BOT -> {response_dict} ")
     
-    conversation_history[sender_number]['messages'].append(response)
-    response_content = response.content
-
-    save_message_to_history(sender_number, 'bot', response_content, conversation_id)
+    # Extrai a resposta do dicionário
+    response_content = response_dict["resposta"]
+    fase = response_dict["fase"]
     
-    logging.info(f"BANT STATUS {conversation_history[sender_number]['bant']}")
-
-    sufixo = "@s.whatsapp.net"
-
-    if sender_number.endswith(sufixo):
-        numero = sender_number[:-len("@s.whatsapp.net")]
-    else:
-        numero = sender_number  # Fallback se não tiver o sufixo
+    # Atualiza o estágio da conversa
+    conversation_history[sender_number]['stage'] = fase
     
-    if "orcamento" in response_content.lower() or "orçamento" in response_content.lower():
-        conversation_history[sender_number]['stage'] = 2
-    elif is_qualification_message(response_content):
+    # Adiciona a resposta do bot ao histórico (como AIMessage normal)
+    conversation_history[sender_number]['messages'].append(AIMessage(content=response_content))
+    
+    if fase in (5,2.5):#is_qualification_message(response_content):
         logging.info(f"Qualificação detectada para {sender_number}")
-        infos = get_info(history_str)
-        conversation_history[sender_number]['stage'] = 3
-        logging.info(f"Lead qualificado: {sender_number} - Intent: {conversation_history[sender_number]['intent']}")
         
-        if isinstance(infos, str):
-            try:
-                infos = json.loads(infos)
-            except Exception as e:
-                logging.error(f"Erro ao converter infos para dict: {e}")
-                infos = {}
-        
-        logging.info(f"Informações do lead: {infos}")
-        
+        sufixo = "@s.whatsapp.net"
+        if sender_number.endswith(sufixo):
+            numero = sender_number[:-len("@s.whatsapp.net")]
+        else:
+            numero = sender_number  # Fallback se não tiver o sufixo
+    
+        msg_qualificacao = get_info(conversation_history, numero)
 
-        demanda = infos.get('DEMANDA', 'Não Informado')
-        interesse = infos.get('INTERESSE', "Produto não especificado")
-        budget = infos.get('BUDGET/FORMA PAGAMENTO', "Valor não especificado")
-        urgency = infos.get('URGENCIA', "Não especificado")
-        pesquisando = infos.get('ESTA-PESQUISANDO', 'Não Informado')
+        logging.info(f'enviando msg para grupo de qualficacao: {msg_qualificacao}')
         
-        logging.info(f"DEMANDA: {demanda}, INTERESSE: {interesse}, BUDGET: {budget}, URGENCIA: {urgency}, ESTA-PESQUISANDO: {pesquisando}")
-        
-        msg_qualificacao = f"""
-    Lead Qualificado 🔥:
-    Nome: {name},
-    Telefone: {numero},
-    Interesse: {interesse},
-    Budget: {budget},
-    Urgencia: {urgency},
-    Esta-Pesquisando: {pesquisando},
-    Link: https://wa.me/{numero}
-        """
-        
-        logging.info('enviando msg para grupode qualficacao')
-        
-        logging.info(f'Mensagem de qualificação: {msg_qualificacao}')
         id_grupo_cliente =  client_config.get('group_id', 'Não Informado')
         response = send_whatsapp_message(id_grupo_cliente, msg_qualificacao)
         upsert_qualified_lead(sender_number, CLIENT_ID)
-        
-        atualizar_status_lead(numero, "hot")
-        logging.info(f"Lead {numero} atualizado para status 'hot' no CRM.")
-    
-    logging.info(f'Resposta para o Usuario: {response_content}')
-    if response_content.strip() != "#no-answer":
-        send_whatsapp_message(sender_number, response_content)
-        current_stage = conversation_history[sender_number]['stage']
-        ##save_conversation_state(
-        ##    sender_number=sender_number,
-        ##    last_user_message=message,
-        ##    last_bot_message=response_content,
-        ##    stage=current_stage,
-        ##    last_activity=datetime.now(pytz.utc)
-        ##)
-        
-        #insere resposta bot no crm
-        #json_responde_bot = make_json_response_bot(chatName=name, chatLid=sender_number, fromMe=True, instanceId='', messageId='', status='SENT', senderName='CRM', messageType='text', messageContent=response_content, phone=numero)
 
-        #inserir_dados_crm(json_responde_bot)
+    save_message_to_history(sender_number, 'bot', response_content, conversation_id)
+    send_whatsapp_message(sender_number, response_content)
         
 
 def is_qualification_detected(response_text: str, conversation_stage: int) -> bool:
@@ -1134,58 +1066,38 @@ def transcrever_audio_base64(audio_base64: str) -> str:
 # Habilitar chave da OpenAI
 os.environ['OPENAI_API_KEY'] = os.getenv("OPENAI_API_KEY")
 
-def get_info(history: list) -> str:
+def get_info(history: list, numero) -> str:
 
     prompt = f"""
     ## TAREFA
     Analise o histórico de conversa abaixo e extraia 
-    - o *INTERESSE* principal do cliente
-    - a *DEMANDA* (se o interesse do cliente é comprar um celular ou outro produto/serviço)
-    - o *BUDGET/FORMA PAGAMENTO* (valor total que ele tem para comprar o produto, e a forma de pagamento escolhida)
-    - a *URGENCIA* (Quando o cliente pretende comprar o produto)
-    - *ESTA-PESQUISANDO* (Quando o cliente está fazendo o orçamento ou pesquisando em outras lojas)
+    1. *Nome* (se não constar do WhatsApp)  
+    2. *Interesse*: Produto de interesse  
+    3. *Cidade/Bairro* (Cidade e ou Bairro)  
+    4. *Budget* (Qual o orçamento disponível) 
+    5. *Prazo/urgência*: para quando deseja iniciar (ex.: “essa semana”)  
+    6. *Esta-Pesquisando* (Está pesquisando em outras lojas ou apenas aqui?)
+    7. Telefone: Link: https://wa.me/{numero}
 
-    ## INSTRUÇÕES
-    
-    ### INTERESSE
-    1. Identifique o produto/serviço que o cliente demonstrou interesse. Os serviços incluem: compra, venda, troca, conserto e impressão de documentos.
-    2. Seja específico com modelos quando possível (ex: "iPhone 15 Pro" em vez de apenas "iPhone").
-    3. Se mencionar troca, inclua ambos os aparelhos (ex: "Troca de iPhone X por iPhone 12").
-    4. Para consertos, especifique o problema (ex: "Conserto de tela quebrada").
-    5. Priorize o interesse MAIS RECENTE.
-    6. Para impressão de documentos, especifique o tipo (ex: "Impressão de documentos").
-    
-    ### DEMANDA
-    - Caso o Interesse do cliente seja a COMPRA de um celular retorne o valor "Compra"
-    - Caso o Interesse do cliete não seja a COMPRA de um celular retorne o valor "Outro"
-
-    ### BUDGET/FORMA PAGAMENTO
-    - Exemplo com budget e forma de pagamento: "Budget/Forma Pagamento": "5000,00 - Pix" 
-    - Exemplo com budget e sem forma de pagamento: "Budget/Forma Pagamento": "5000,00"
-    - Exemplo sem budget e sem forma de pagamento : "Budget/Forma Pagamento": "Não Informado"
-
-    ### URGENCIA
-    - Idenfique a urgencia do cliente, exemplo: hoje, amanha, semana que vem, mes que vem
-    - Se não houver menção de valor, retorne: "Não especificado".
-    
-    ### ESTA-PESQUISANDO
-    - Idenrifique se o cliente está pesquisando ou orçando em outro estabelecimento 
-    - Exemplo: "ESTA-PESQUISANDO": "Tem orçamento de outra loja, valor: 5200,00"
-
-    ## IMPORTANTE
-    - A resposta deve conter apenas o JSON.
-    - Não adicione comentários, explicações ou qualquer outro texto fora do JSON.
-    - Certifique-se de que o JSON está formatado corretamente sem ``` e sem a palavra "json" escrito, apenas as keys, valores e chaves.
+    ## FORMATO DE RESPOSTA
+    > *Nome* (se não constar do WhatsApp)  
+    > Interesse: (Qual produto a pessoa está interessada)
+    > Cidade: (qual cidade e ou bairro)
+    > Budget: (Qual o orçamento disponível)
+    > Urgencia: (Em quanto tempo pretende comprar)
+    > Esta-Pesquisando: (Sim ou Não)
+    > Telefone: Link: https://wa.me/{numero}
 
     ## HISTÓRICO
     {history}
+    
+    ##Contato 
+    {numero}
+    
     """
 
     # Substituído Groq por OpenAI
-    chat = ChatOpenAI(
-        temperature=0, 
-        model="gpt-4o-mini"
-    )
+    chat = ChatOpenAI(temperature=0, model="gpt-4o-mini")
     response = chat.invoke(prompt)
 
     return response.content.strip()
@@ -1280,23 +1192,24 @@ def get_custom_prompt(query, history_str, intent ,nome_cliente):
 
 def make_answer(prompt):
     # Substituído Groq por OpenAI
-    chat = ChatOpenAI(
-        temperature=0, 
-        model="gpt-4o-mini"
-    )
-    system = SystemMessage(content=(
-        "Você é um assistente. NÃO realize buscas na web, NÃO use ferramentas externas e NÃO acesse URLs. "
-        "Responda apenas com base no contexto e no histórico fornecidos."
-    ))
-    
+    chat = ChatOpenAI(temperature=0, model="gpt-4o-mini")
     res = chat.invoke(prompt)
-    #res = chat.invoke([system, HumanMessage(content=prompt)])
     
-    response_text = res.content
-    # Removido tratamento específico do Groq
-    response_text = response_text.strip()
+    response_text = res.content.strip()
     
-    return AIMessage(content=response_text)
+    logging.info(f"Resposta bruta do LLM antes da validação JSON: {response_text}")
+    
+    try:
+        # Tenta parsear a resposta como JSON
+        response_dict = json.loads(response_text)
+        # Garante que tenha as chaves esperadas
+        if "fase" not in response_dict or "resposta" not in response_dict:
+            return {"fase": 1, "resposta": response_text}
+        return response_dict
+    except json.JSONDecodeError:
+        # Fallback se não for JSON válido
+        logging.warning(f"Resposta não é JSON válido: {response_text}")
+        return {"fase": 1, "resposta": response_text}
 
 def detect_intent(text):
     keywords = {
@@ -1325,7 +1238,7 @@ def get_text_message_input(recipient, text):
 
 def send_whatsapp_message(number: str, text: str):
     #logging.info(f'resposta do bot -> {text}')
-    url = f"https://saraevo-evolution-api.jntduz.easypanel.host/message/sendText/{cliente_evo}"
+    url = f"https://medicos-evolution-api.gr9uf9.easypanel.host/message/sendText/{cliente_evo}"
     payload = {
         "number": number,
         "text": text
@@ -1343,7 +1256,7 @@ def send_whatsapp_message(number: str, text: str):
 async def messages_upsert(request: Request):
     data = await request.json()
     key = data['data']['key']
-    full_jid = key.get('senderPn') or key.get('remoteJid')
+    full_jid = key.get('remoteJidAlt') if key.get('addressingMode') == 'lid' else key.get('remoteJid')
     msg_type = data['data']['messageType']
     msg_id = data['data']['key']['id']
     from_me_flag = data['data']['key']['fromMe']
