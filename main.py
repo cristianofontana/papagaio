@@ -153,7 +153,7 @@ lugares_que_faz_entrega = client_config.get('lugares_que_faz_entrega', '')
 forma_pagamento_iphone = client_config.get('forma_pagamento_iphone', 'à vista e cartão em até 21X')
 forma_pagamento_android = client_config.get('forma_pagamento_android', 'à vista, no cartão em até 21X ou boleto')
 COLLECTION_NAME = client_config.get('collection_name', 'Não Informado')
-cliente_evo = 'lets go'  #COLLECTION_NAME
+cliente_evo = 'Lets Go'  #COLLECTION_NAME
 AUTHORIZED_NUMBERS = client_config.get('authorized_numbers', [''])
 
 id_grupo_cliente =  client_config.get('group_id', 'Não Informado')#'120363420079107628@g.us' #120363420079107628@g.us id grupo papagaio 
@@ -926,13 +926,13 @@ def process_user_message(sender_number: str, message: str, name: str):
     if response_content.strip() != "#no-answer":
         send_whatsapp_message(sender_number, response_content)
         current_stage = conversation_history[sender_number]['stage']
-        ##save_conversation_state(
-        ##    sender_number=sender_number,
-        ##    last_user_message=message,
-        ##    last_bot_message=response_content,
-        ##    stage=current_stage,
-        ##    last_activity=datetime.now(pytz.utc)
-        ##)
+        save_conversation_state(
+            sender_number=sender_number,
+            last_user_message=message,
+            last_bot_message=response_content,
+            stage=current_stage,
+            last_activity=datetime.now(pytz.utc)
+        )
         
         #insere resposta bot no crm
         #json_responde_bot = make_json_response_bot(chatName=name, chatLid=sender_number, fromMe=True, instanceId='', messageId='', status='SENT', senderName='CRM', messageType='text', messageContent=response_content, phone=numero)
